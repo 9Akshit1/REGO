@@ -30,10 +30,10 @@ variable offset_x equal 0.000500000000
 variable offset_y equal 0.006500000000
 
 # === FIELD APPROXIMATION ===
-# 31-peak Gaussian approximation (dynamically selected)
-# Peak selection: 20% threshold, 6.0 mm min separation
+# 9-peak Gaussian approximation (dynamically selected)
+# Peak selection: 70% threshold, 6.0 mm min separation
 # Peak width: 3.0 mm (3× FEM grid spacing)
-# Field coverage: ~71.2% of gradient energy
+# Field coverage: ~25.9% of gradient energy
 
 # Peak 1 at FEM=(0.0400, -0.0180) m
 variable peak0_x equal 0.040000000000
@@ -161,317 +161,9 @@ variable gauss8 atom "exp(-v_r2_8/(2*v_peak8_width*v_peak8_width))"
 variable gBx8 atom "v_peak8_gradBx*v_gauss8"
 variable gBy8 atom "v_peak8_gradBy*v_gauss8"
 
-# Peak 10 at FEM=(-0.0400, -0.0170) m
-variable peak9_x equal -0.040000000000
-variable peak9_y equal -0.017000000000
-variable peak9_gradBx equal -2.412315692806e+01
-variable peak9_gradBy equal -2.498874639419e+04
-variable peak9_width equal 0.003000000000
-
-variable dx9 atom "(x*v_scale_x+v_offset_x)-v_peak9_x"
-variable dy9 atom "(y*v_scale_y+v_offset_y)-v_peak9_y"
-variable r2_9 atom "v_dx9*v_dx9+v_dy9*v_dy9"
-variable gauss9 atom "exp(-v_r2_9/(2*v_peak9_width*v_peak9_width))"
-variable gBx9 atom "v_peak9_gradBx*v_gauss9"
-variable gBy9 atom "v_peak9_gradBy*v_gauss9"
-
-# Peak 11 at FEM=(-0.0400, -0.0100) m
-variable peak10_x equal -0.040000000000
-variable peak10_y equal -0.010000000000
-variable peak10_gradBx equal -2.290621185622e+01
-variable peak10_gradBy equal -2.473570891069e+04
-variable peak10_width equal 0.003000000000
-
-variable dx10 atom "(x*v_scale_x+v_offset_x)-v_peak10_x"
-variable dy10 atom "(y*v_scale_y+v_offset_y)-v_peak10_y"
-variable r2_10 atom "v_dx10*v_dx10+v_dy10*v_dy10"
-variable gauss10 atom "exp(-v_r2_10/(2*v_peak10_width*v_peak10_width))"
-variable gBx10 atom "v_peak10_gradBx*v_gauss10"
-variable gBy10 atom "v_peak10_gradBy*v_gauss10"
-
-# Peak 12 at FEM=(0.0500, -0.0010) m
-variable peak11_x equal 0.050000000000
-variable peak11_y equal -0.001000000000
-variable peak11_gradBx equal -1.850540900578e+01
-variable peak11_gradBy equal -2.458358628128e+04
-variable peak11_width equal 0.003000000000
-
-variable dx11 atom "(x*v_scale_x+v_offset_x)-v_peak11_x"
-variable dy11 atom "(y*v_scale_y+v_offset_y)-v_peak11_y"
-variable r2_11 atom "v_dx11*v_dx11+v_dy11*v_dy11"
-variable gauss11 atom "exp(-v_r2_11/(2*v_peak11_width*v_peak11_width))"
-variable gBx11 atom "v_peak11_gradBx*v_gauss11"
-variable gBy11 atom "v_peak11_gradBy*v_gauss11"
-
-# Peak 13 at FEM=(-0.0400, -0.0240) m
-variable peak12_x equal -0.040000000000
-variable peak12_y equal -0.024000000000
-variable peak12_gradBx equal -7.491603859400e+00
-variable peak12_gradBy equal -2.453742048898e+04
-variable peak12_width equal 0.003000000000
-
-variable dx12 atom "(x*v_scale_x+v_offset_x)-v_peak12_x"
-variable dy12 atom "(y*v_scale_y+v_offset_y)-v_peak12_y"
-variable r2_12 atom "v_dx12*v_dx12+v_dy12*v_dy12"
-variable gauss12 atom "exp(-v_r2_12/(2*v_peak12_width*v_peak12_width))"
-variable gBx12 atom "v_peak12_gradBx*v_gauss12"
-variable gBy12 atom "v_peak12_gradBy*v_gauss12"
-
-# Peak 14 at FEM=(-0.0400, -0.0040) m
-variable peak13_x equal -0.040000000000
-variable peak13_y equal -0.004000000000
-variable peak13_gradBx equal -1.919592986656e+01
-variable peak13_gradBy equal -2.414091049142e+04
-variable peak13_width equal 0.003000000000
-
-variable dx13 atom "(x*v_scale_x+v_offset_x)-v_peak13_x"
-variable dy13 atom "(y*v_scale_y+v_offset_y)-v_peak13_y"
-variable r2_13 atom "v_dx13*v_dx13+v_dy13*v_dy13"
-variable gauss13 atom "exp(-v_r2_13/(2*v_peak13_width*v_peak13_width))"
-variable gBx13 atom "v_peak13_gradBx*v_gauss13"
-variable gBy13 atom "v_peak13_gradBy*v_gauss13"
-
-# Peak 15 at FEM=(-0.0400, 0.0030) m
-variable peak14_x equal -0.040000000000
-variable peak14_y equal 0.003000000000
-variable peak14_gradBx equal -1.480449391125e+01
-variable peak14_gradBy equal -2.373021373105e+04
-variable peak14_width equal 0.003000000000
-
-variable dx14 atom "(x*v_scale_x+v_offset_x)-v_peak14_x"
-variable dy14 atom "(y*v_scale_y+v_offset_y)-v_peak14_y"
-variable r2_14 atom "v_dx14*v_dx14+v_dy14*v_dy14"
-variable gauss14 atom "exp(-v_r2_14/(2*v_peak14_width*v_peak14_width))"
-variable gBx14 atom "v_peak14_gradBx*v_gauss14"
-variable gBy14 atom "v_peak14_gradBy*v_gauss14"
-
-# Peak 16 at FEM=(0.0400, 0.0040) m
-variable peak15_x equal 0.040000000000
-variable peak15_y equal 0.004000000000
-variable peak15_gradBx equal -1.640935288652e+01
-variable peak15_gradBy equal 2.370279831509e+04
-variable peak15_width equal 0.003000000000
-
-variable dx15 atom "(x*v_scale_x+v_offset_x)-v_peak15_x"
-variable dy15 atom "(y*v_scale_y+v_offset_y)-v_peak15_y"
-variable r2_15 atom "v_dx15*v_dx15+v_dy15*v_dy15"
-variable gauss15 atom "exp(-v_r2_15/(2*v_peak15_width*v_peak15_width))"
-variable gBx15 atom "v_peak15_gradBx*v_gauss15"
-variable gBy15 atom "v_peak15_gradBy*v_gauss15"
-
-# Peak 17 at FEM=(-0.0400, 0.0110) m
-variable peak16_x equal -0.040000000000
-variable peak16_y equal 0.011000000000
-variable peak16_gradBx equal -1.227602371262e+01
-variable peak16_gradBy equal -2.333637792740e+04
-variable peak16_width equal 0.003000000000
-
-variable dx16 atom "(x*v_scale_x+v_offset_x)-v_peak16_x"
-variable dy16 atom "(y*v_scale_y+v_offset_y)-v_peak16_y"
-variable r2_16 atom "v_dx16*v_dx16+v_dy16*v_dy16"
-variable gauss16 atom "exp(-v_r2_16/(2*v_peak16_width*v_peak16_width))"
-variable gBx16 atom "v_peak16_gradBx*v_gauss16"
-variable gBy16 atom "v_peak16_gradBy*v_gauss16"
-
-# Peak 18 at FEM=(-0.0400, 0.0480) m
-variable peak17_x equal -0.040000000000
-variable peak17_y equal 0.048000000000
-variable peak17_gradBx equal 1.653164980978e+04
-variable peak17_gradBy equal -1.631638639866e+04
-variable peak17_width equal 0.003000000000
-
-variable dx17 atom "(x*v_scale_x+v_offset_x)-v_peak17_x"
-variable dy17 atom "(y*v_scale_y+v_offset_y)-v_peak17_y"
-variable r2_17 atom "v_dx17*v_dx17+v_dy17*v_dy17"
-variable gauss17 atom "exp(-v_r2_17/(2*v_peak17_width*v_peak17_width))"
-variable gBx17 atom "v_peak17_gradBx*v_gauss17"
-variable gBy17 atom "v_peak17_gradBy*v_gauss17"
-
-# Peak 19 at FEM=(0.0500, 0.0190) m
-variable peak18_x equal 0.050000000000
-variable peak18_y equal 0.019000000000
-variable peak18_gradBx equal -1.400950740316e+01
-variable peak18_gradBy equal -2.297494359565e+04
-variable peak18_width equal 0.003000000000
-
-variable dx18 atom "(x*v_scale_x+v_offset_x)-v_peak18_x"
-variable dy18 atom "(y*v_scale_y+v_offset_y)-v_peak18_y"
-variable r2_18 atom "v_dx18*v_dx18+v_dy18*v_dy18"
-variable gauss18 atom "exp(-v_r2_18/(2*v_peak18_width*v_peak18_width))"
-variable gBx18 atom "v_peak18_gradBx*v_gauss18"
-variable gBy18 atom "v_peak18_gradBy*v_gauss18"
-
-# Peak 20 at FEM=(-0.0400, 0.0180) m
-variable peak19_x equal -0.040000000000
-variable peak19_y equal 0.018000000000
-variable peak19_gradBx equal -1.201326605638e+01
-variable peak19_gradBy equal -2.289519988524e+04
-variable peak19_width equal 0.003000000000
-
-variable dx19 atom "(x*v_scale_x+v_offset_x)-v_peak19_x"
-variable dy19 atom "(y*v_scale_y+v_offset_y)-v_peak19_y"
-variable r2_19 atom "v_dx19*v_dx19+v_dy19*v_dy19"
-variable gauss19 atom "exp(-v_r2_19/(2*v_peak19_width*v_peak19_width))"
-variable gBx19 atom "v_peak19_gradBx*v_gauss19"
-variable gBy19 atom "v_peak19_gradBy*v_gauss19"
-
-# Peak 21 at FEM=(0.0500, 0.0260) m
-variable peak20_x equal 0.050000000000
-variable peak20_y equal 0.026000000000
-variable peak20_gradBx equal -1.317561974158e+01
-variable peak20_gradBy equal -2.229433448414e+04
-variable peak20_width equal 0.003000000000
-
-variable dx20 atom "(x*v_scale_x+v_offset_x)-v_peak20_x"
-variable dy20 atom "(y*v_scale_y+v_offset_y)-v_peak20_y"
-variable r2_20 atom "v_dx20*v_dx20+v_dy20*v_dy20"
-variable gauss20 atom "exp(-v_r2_20/(2*v_peak20_width*v_peak20_width))"
-variable gBx20 atom "v_peak20_gradBx*v_gauss20"
-variable gBy20 atom "v_peak20_gradBy*v_gauss20"
-
-# Peak 22 at FEM=(-0.0400, 0.0250) m
-variable peak21_x equal -0.040000000000
-variable peak21_y equal 0.025000000000
-variable peak21_gradBx equal -1.384525210698e+01
-variable peak21_gradBy equal -2.221627194287e+04
-variable peak21_width equal 0.003000000000
-
-variable dx21 atom "(x*v_scale_x+v_offset_x)-v_peak21_x"
-variable dy21 atom "(y*v_scale_y+v_offset_y)-v_peak21_y"
-variable r2_21 atom "v_dx21*v_dx21+v_dy21*v_dy21"
-variable gauss21 atom "exp(-v_r2_21/(2*v_peak21_width*v_peak21_width))"
-variable gBx21 atom "v_peak21_gradBx*v_gauss21"
-variable gBy21 atom "v_peak21_gradBy*v_gauss21"
-
-# Peak 23 at FEM=(0.0500, 0.0330) m
-variable peak22_x equal 0.050000000000
-variable peak22_y equal 0.033000000000
-variable peak22_gradBx equal -1.290950589503e+01
-variable peak22_gradBy equal -2.159315527294e+04
-variable peak22_width equal 0.003000000000
-
-variable dx22 atom "(x*v_scale_x+v_offset_x)-v_peak22_x"
-variable dy22 atom "(y*v_scale_y+v_offset_y)-v_peak22_y"
-variable r2_22 atom "v_dx22*v_dx22+v_dy22*v_dy22"
-variable gauss22 atom "exp(-v_r2_22/(2*v_peak22_width*v_peak22_width))"
-variable gBx22 atom "v_peak22_gradBx*v_gauss22"
-variable gBy22 atom "v_peak22_gradBy*v_gauss22"
-
-# Peak 24 at FEM=(-0.0400, 0.0320) m
-variable peak23_x equal -0.040000000000
-variable peak23_y equal 0.032000000000
-variable peak23_gradBx equal -1.236221571215e+01
-variable peak23_gradBy equal -2.157742024625e+04
-variable peak23_width equal 0.003000000000
-
-variable dx23 atom "(x*v_scale_x+v_offset_x)-v_peak23_x"
-variable dy23 atom "(y*v_scale_y+v_offset_y)-v_peak23_y"
-variable r2_23 atom "v_dx23*v_dx23+v_dy23*v_dy23"
-variable gauss23 atom "exp(-v_r2_23/(2*v_peak23_width*v_peak23_width))"
-variable gBx23 atom "v_peak23_gradBx*v_gauss23"
-variable gBy23 atom "v_peak23_gradBy*v_gauss23"
-
-# Peak 25 at FEM=(0.0500, 0.0490) m
-variable peak24_x equal 0.050000000000
-variable peak24_y equal 0.049000000000
-variable peak24_gradBx equal -1.460632529250e+04
-variable peak24_gradBy equal -1.573326165930e+04
-variable peak24_width equal 0.003000000000
-
-variable dx24 atom "(x*v_scale_x+v_offset_x)-v_peak24_x"
-variable dy24 atom "(y*v_scale_y+v_offset_y)-v_peak24_y"
-variable r2_24 atom "v_dx24*v_dx24+v_dy24*v_dy24"
-variable gauss24 atom "exp(-v_r2_24/(2*v_peak24_width*v_peak24_width))"
-variable gBx24 atom "v_peak24_gradBx*v_gauss24"
-variable gBy24 atom "v_peak24_gradBy*v_gauss24"
-
-# Peak 26 at FEM=(-0.0400, 0.0380) m
-variable peak25_x equal -0.040000000000
-variable peak25_y equal 0.038000000000
-variable peak25_gradBx equal -1.233663687223e+01
-variable peak25_gradBy equal -2.094942958073e+04
-variable peak25_width equal 0.003000000000
-
-variable dx25 atom "(x*v_scale_x+v_offset_x)-v_peak25_x"
-variable dy25 atom "(y*v_scale_y+v_offset_y)-v_peak25_y"
-variable r2_25 atom "v_dx25*v_dx25+v_dy25*v_dy25"
-variable gauss25 atom "exp(-v_r2_25/(2*v_peak25_width*v_peak25_width))"
-variable gBx25 atom "v_peak25_gradBx*v_gauss25"
-variable gBy25 atom "v_peak25_gradBy*v_gauss25"
-
-# Peak 27 at FEM=(0.0500, 0.0400) m
-variable peak26_x equal 0.050000000000
-variable peak26_y equal 0.040000000000
-variable peak26_gradBx equal -2.164562172543e+01
-variable peak26_gradBy equal -2.057934084767e+04
-variable peak26_width equal 0.003000000000
-
-variable dx26 atom "(x*v_scale_x+v_offset_x)-v_peak26_x"
-variable dy26 atom "(y*v_scale_y+v_offset_y)-v_peak26_y"
-variable r2_26 atom "v_dx26*v_dx26+v_dy26*v_dy26"
-variable gauss26 atom "exp(-v_r2_26/(2*v_peak26_width*v_peak26_width))"
-variable gBx26 atom "v_peak26_gradBx*v_gauss26"
-variable gBy26 atom "v_peak26_gradBy*v_gauss26"
-
-# Peak 28 at FEM=(0.0500, -0.0440) m
-variable peak27_x equal 0.050000000000
-variable peak27_y equal -0.044000000000
-variable peak27_gradBx equal 1.350622575798e+02
-variable peak27_gradBy equal -1.824612093585e+04
-variable peak27_width equal 0.003000000000
-
-variable dx27 atom "(x*v_scale_x+v_offset_x)-v_peak27_x"
-variable dy27 atom "(y*v_scale_y+v_offset_y)-v_peak27_y"
-variable r2_27 atom "v_dx27*v_dx27+v_dy27*v_dy27"
-variable gauss27 atom "exp(-v_r2_27/(2*v_peak27_width*v_peak27_width))"
-variable gBx27 atom "v_peak27_gradBx*v_gauss27"
-variable gBy27 atom "v_peak27_gradBy*v_gauss27"
-
-# Peak 29 at FEM=(-0.0400, -0.0400) m
-variable peak28_x equal -0.040000000000
-variable peak28_y equal -0.040000000000
-variable peak28_gradBx equal -2.136354612552e+03
-variable peak28_gradBy equal -1.741746422797e+04
-variable peak28_width equal 0.003000000000
-
-variable dx28 atom "(x*v_scale_x+v_offset_x)-v_peak28_x"
-variable dy28 atom "(y*v_scale_y+v_offset_y)-v_peak28_y"
-variable r2_28 atom "v_dx28*v_dx28+v_dy28*v_dy28"
-variable gauss28 atom "exp(-v_r2_28/(2*v_peak28_width*v_peak28_width))"
-variable gBx28 atom "v_peak28_gradBx*v_gauss28"
-variable gBy28 atom "v_peak28_gradBy*v_gauss28"
-
-# Peak 30 at FEM=(0.0400, -0.0400) m
-variable peak29_x equal 0.040000000000
-variable peak29_y equal -0.040000000000
-variable peak29_gradBx equal -8.070742933031e+03
-variable peak29_gradBy equal 7.237580272887e+03
-variable peak29_width equal 0.003000000000
-
-variable dx29 atom "(x*v_scale_x+v_offset_x)-v_peak29_x"
-variable dy29 atom "(y*v_scale_y+v_offset_y)-v_peak29_y"
-variable r2_29 atom "v_dx29*v_dx29+v_dy29*v_dy29"
-variable gauss29 atom "exp(-v_r2_29/(2*v_peak29_width*v_peak29_width))"
-variable gBx29 atom "v_peak29_gradBx*v_gauss29"
-variable gBy29 atom "v_peak29_gradBy*v_gauss29"
-
-# Peak 31 at FEM=(0.0500, 0.0560) m
-variable peak30_x equal 0.050000000000
-variable peak30_y equal 0.056000000000
-variable peak30_gradBx equal -3.206973814022e+02
-variable peak30_gradBy equal -7.588238554237e+03
-variable peak30_width equal 0.003000000000
-
-variable dx30 atom "(x*v_scale_x+v_offset_x)-v_peak30_x"
-variable dy30 atom "(y*v_scale_y+v_offset_y)-v_peak30_y"
-variable r2_30 atom "v_dx30*v_dx30+v_dy30*v_dy30"
-variable gauss30 atom "exp(-v_r2_30/(2*v_peak30_width*v_peak30_width))"
-variable gBx30 atom "v_peak30_gradBx*v_gauss30"
-variable gBy30 atom "v_peak30_gradBy*v_gauss30"
-
 # === TOTAL MAGNETIC FORCE FIELD ===
-variable BgradB_x atom "v_gBx0 + v_gBx1 + v_gBx2 + v_gBx3 + v_gBx4 + v_gBx5 + v_gBx6 + v_gBx7 + v_gBx8 + v_gBx9 + v_gBx10 + v_gBx11 + v_gBx12 + v_gBx13 + v_gBx14 + v_gBx15 + v_gBx16 + v_gBx17 + v_gBx18 + v_gBx19 + v_gBx20 + v_gBx21 + v_gBx22 + v_gBx23 + v_gBx24 + v_gBx25 + v_gBx26 + v_gBx27 + v_gBx28 + v_gBx29 + v_gBx30"
-variable BgradB_y atom "v_gBy0 + v_gBy1 + v_gBy2 + v_gBy3 + v_gBy4 + v_gBy5 + v_gBy6 + v_gBy7 + v_gBy8 + v_gBy9 + v_gBy10 + v_gBy11 + v_gBy12 + v_gBy13 + v_gBy14 + v_gBy15 + v_gBy16 + v_gBy17 + v_gBy18 + v_gBy19 + v_gBy20 + v_gBy21 + v_gBy22 + v_gBy23 + v_gBy24 + v_gBy25 + v_gBy26 + v_gBy27 + v_gBy28 + v_gBy29 + v_gBy30"
+variable BgradB_x atom "v_gBx0 + v_gBx1 + v_gBx2 + v_gBx3 + v_gBx4 + v_gBx5 + v_gBx6 + v_gBx7 + v_gBx8"
+variable BgradB_y atom "v_gBy0 + v_gBy1 + v_gBy2 + v_gBy3 + v_gBy4 + v_gBy5 + v_gBy6 + v_gBy7 + v_gBy8"
 
 # === MAGNETIC FORCES BY PARTICLE TYPE ===
 # Type 1 (pts_fine): r=20.0 μm, χ=-3.50e-05 (diamagnetic (repelled))
@@ -552,7 +244,7 @@ variable fy_mag_viz atom "(type==1)*v_fy_mag_t1_ramped + (type==2)*v_fy_mag_t2_r
 variable fz_mag_viz atom "0.0"  # No z-component (2D field)
 
 # Magnetic field magnitude at each particle location
-variable B_magnitude atom "sqrt(v_gauss0*v_peak0_gradBx*v_peak0_gradBx + v_gauss0*v_peak0_gradBy*v_peak0_gradBy + v_gauss1*v_peak1_gradBx*v_peak1_gradBx + v_gauss1*v_peak1_gradBy*v_peak1_gradBy + v_gauss2*v_peak2_gradBx*v_peak2_gradBx + v_gauss2*v_peak2_gradBy*v_peak2_gradBy + v_gauss3*v_peak3_gradBx*v_peak3_gradBx + v_gauss3*v_peak3_gradBy*v_peak3_gradBy + v_gauss4*v_peak4_gradBx*v_peak4_gradBx + v_gauss4*v_peak4_gradBy*v_peak4_gradBy + v_gauss5*v_peak5_gradBx*v_peak5_gradBx + v_gauss5*v_peak5_gradBy*v_peak5_gradBy + v_gauss6*v_peak6_gradBx*v_peak6_gradBx + v_gauss6*v_peak6_gradBy*v_peak6_gradBy + v_gauss7*v_peak7_gradBx*v_peak7_gradBx + v_gauss7*v_peak7_gradBy*v_peak7_gradBy + v_gauss8*v_peak8_gradBx*v_peak8_gradBx + v_gauss8*v_peak8_gradBy*v_peak8_gradBy + v_gauss9*v_peak9_gradBx*v_peak9_gradBx + v_gauss9*v_peak9_gradBy*v_peak9_gradBy + v_gauss10*v_peak10_gradBx*v_peak10_gradBx + v_gauss10*v_peak10_gradBy*v_peak10_gradBy + v_gauss11*v_peak11_gradBx*v_peak11_gradBx + v_gauss11*v_peak11_gradBy*v_peak11_gradBy + v_gauss12*v_peak12_gradBx*v_peak12_gradBx + v_gauss12*v_peak12_gradBy*v_peak12_gradBy + v_gauss13*v_peak13_gradBx*v_peak13_gradBx + v_gauss13*v_peak13_gradBy*v_peak13_gradBy + v_gauss14*v_peak14_gradBx*v_peak14_gradBx + v_gauss14*v_peak14_gradBy*v_peak14_gradBy + v_gauss15*v_peak15_gradBx*v_peak15_gradBx + v_gauss15*v_peak15_gradBy*v_peak15_gradBy + v_gauss16*v_peak16_gradBx*v_peak16_gradBx + v_gauss16*v_peak16_gradBy*v_peak16_gradBy + v_gauss17*v_peak17_gradBx*v_peak17_gradBx + v_gauss17*v_peak17_gradBy*v_peak17_gradBy + v_gauss18*v_peak18_gradBx*v_peak18_gradBx + v_gauss18*v_peak18_gradBy*v_peak18_gradBy + v_gauss19*v_peak19_gradBx*v_peak19_gradBx + v_gauss19*v_peak19_gradBy*v_peak19_gradBy + v_gauss20*v_peak20_gradBx*v_peak20_gradBx + v_gauss20*v_peak20_gradBy*v_peak20_gradBy + v_gauss21*v_peak21_gradBx*v_peak21_gradBx + v_gauss21*v_peak21_gradBy*v_peak21_gradBy + v_gauss22*v_peak22_gradBx*v_peak22_gradBx + v_gauss22*v_peak22_gradBy*v_peak22_gradBy + v_gauss23*v_peak23_gradBx*v_peak23_gradBx + v_gauss23*v_peak23_gradBy*v_peak23_gradBy + v_gauss24*v_peak24_gradBx*v_peak24_gradBx + v_gauss24*v_peak24_gradBy*v_peak24_gradBy + v_gauss25*v_peak25_gradBx*v_peak25_gradBx + v_gauss25*v_peak25_gradBy*v_peak25_gradBy + v_gauss26*v_peak26_gradBx*v_peak26_gradBx + v_gauss26*v_peak26_gradBy*v_peak26_gradBy + v_gauss27*v_peak27_gradBx*v_peak27_gradBx + v_gauss27*v_peak27_gradBy*v_peak27_gradBy + v_gauss28*v_peak28_gradBx*v_peak28_gradBx + v_gauss28*v_peak28_gradBy*v_peak28_gradBy + v_gauss29*v_peak29_gradBx*v_peak29_gradBx + v_gauss29*v_peak29_gradBy*v_peak29_gradBy + v_gauss30*v_peak30_gradBx*v_peak30_gradBx + v_gauss30*v_peak30_gradBy*v_peak30_gradBy)"
+variable B_magnitude atom "sqrt(v_gauss0*v_peak0_gradBx*v_peak0_gradBx + v_gauss0*v_peak0_gradBy*v_peak0_gradBy + v_gauss1*v_peak1_gradBx*v_peak1_gradBx + v_gauss1*v_peak1_gradBy*v_peak1_gradBy + v_gauss2*v_peak2_gradBx*v_peak2_gradBx + v_gauss2*v_peak2_gradBy*v_peak2_gradBy + v_gauss3*v_peak3_gradBx*v_peak3_gradBx + v_gauss3*v_peak3_gradBy*v_peak3_gradBy + v_gauss4*v_peak4_gradBx*v_peak4_gradBx + v_gauss4*v_peak4_gradBy*v_peak4_gradBy + v_gauss5*v_peak5_gradBx*v_peak5_gradBx + v_gauss5*v_peak5_gradBy*v_peak5_gradBy + v_gauss6*v_peak6_gradBx*v_peak6_gradBx + v_gauss6*v_peak6_gradBy*v_peak6_gradBy + v_gauss7*v_peak7_gradBx*v_peak7_gradBx + v_gauss7*v_peak7_gradBy*v_peak7_gradBy + v_gauss8*v_peak8_gradBx*v_peak8_gradBx + v_gauss8*v_peak8_gradBy*v_peak8_gradBy)"
 
 variable B_gradient_mag atom "sqrt(v_BgradB_x*v_BgradB_x + v_BgradB_y*v_BgradB_y)"
 
@@ -562,37 +254,10 @@ variable x_mapped atom "x*v_scale_x+v_offset_x"  # DEM→FEM X coordinate
 variable y_mapped atom "y*v_scale_y+v_offset_y"  # DEM→FEM Y coordinate
 variable grad_check atom "sqrt(v_BgradB_x*v_BgradB_x+v_BgradB_y*v_BgradB_y)"  # Field gradient magnitude
 
-# Grid: 101 × 113 visualization points
-# Creating via region + lattice for efficiency
 
-# Group field_viz will be created after atoms are added
-# Create dummy atoms at FEM grid points for visualization
-
-# === FIELD GRID FOR VISUALIZATION ===
-region field_viz_region block -0.05050000 0.05150000 -0.05050000 0.06350000 0.075 0.076 units box
-lattice sc 0.00100000
-create_atoms 5 region field_viz_region
-lattice none 1.0  # Reset lattice
-
-# Freeze visualization particles
-group field_viz type 5
-fix freeze_viz field_viz setforce 0.0 0.0 0.0
-velocity field_viz set 0.0 0.0 0.0
-
-# === MAGNETIC FIELD GEOMETRY VISUALIZATION ===
-# Type 5 particles show the actual magnetic field structure
-# These are frozen in space and colored by field strength
-
-# Coil positioned on bottom wall:
-#   X: [-0.0500, 0.0510] m (10.1 cm wide)
-#   Y: [-0.0500, 0.0630] m (11.3 cm wide)
-#   Z: 0.0000 m (on bottom wall)
-
-# In ParaView:
-#   1. Filter by 'type == 5' to see only field visualization
-#   2. Color by 'v_B_magnitude' to see field strength
-#   3. Add Glyph (arrows) using v_fx_mag_viz, v_fy_mag_viz
-#   4. Filter by 'type != 5' to see only real particles
+# === FIELD VISUALIZATION DISABLED ===
+# To enable, set create_field_viz=True in preprocessor
+# Visualization atoms would show field structure as type 5 particles
 
 print "✓ Magnetic field successfully activated!"
 print "  - Force formula: F = (χ·V/μ₀)·(B·∇)B"

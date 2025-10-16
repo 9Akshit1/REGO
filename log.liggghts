@@ -1,0 +1,192 @@
+LIGGGHTS (Version LIGGGHTS-PUBLIC 3.8.0, compiled 2024-03-31-20:10:17 by buildd, git commit unknown)
+#=============================================================================
+# LIGGGHTS Lunar Dust with Magnetic Field Reorganization (CORRECTED)
+#
+# CRITICAL FIXES:
+# 1. χ is now NEGATIVE (diamagnetic) - particles REPELLED from high-field regions
+# 2. χ magnitude realistic: -3.5e-5 (Apollo data, not arbitrary 1e-3)
+# 3. χ uniform across all sizes (material property, not size-dependent)
+# 4. Cohesion REDUCED from 50kJ/m³ to realistic 500-1500 J/m³
+# 5. All physics comments updated to reflect diamagnetic behavior
+#=============================================================================
+
+# Basic simulation setup
+atom_style      granular
+atom_modify     map array
+boundary        f f f
+newton          off
+communicate     single vel yes
+hard_particles yes
+
+# Units and timing
+units           si
+timestep        0.000001
+
+# Simulation domain
+region          reg block -0.055 0.055 -0.055 0.055 0.0 0.16 units box
+create_box      5 reg
+Created orthogonal box = (-0.055 -0.055 0) to (0.055 0.055 0.16)
+  1 by 1 by 1 MPI processor grid
+
+# Neighbor list settings
+neighbor        0.002 bin
+neigh_modify    delay 0
+
+#=============================================================================
+# REALISTIC LUNAR MATERIAL PROPERTIES
+#=============================================================================
+
+# Young's modulus
+fix     m1 all property/global youngsModulus peratomtype         2.e7 4.e7 6.e7 8.e7 2.e7
+
+# Poisson's ratio
+fix     m2 all property/global poissonsRatio peratomtype         0.32 0.25 0.30 0.28 0.32
+
+# Update all peratomtypepair properties
+# Coefficient of restitution (5x5 matrix now)
+fix     m3 all property/global coefficientRestitution peratomtypepair 5             0.40 0.45 0.50 0.55 0.10             0.45 0.48 0.52 0.56 0.10             0.50 0.52 0.55 0.58 0.10             0.55 0.56 0.58 0.60 0.10             0.10 0.10 0.10 0.10 0.10
+
+# Friction coefficient (5x5 matrix) - Lower friction for walls
+fix     m4 all property/global coefficientFriction peratomtypepair 5             1.20 1.10 1.00 0.90 0.00             1.10 1.00 0.90 0.80 0.00             1.00 0.90 0.80 0.70 0.00             0.90 0.80 0.70 0.65 0.00             0.00 0.00 0.00 0.00 0.00
+
+# Rolling friction (5x5 matrix)
+fix     m6 all property/global coefficientRollingFriction peratomtypepair 5             0.25 0.20 0.15 0.12 0.00             0.20 0.18 0.15 0.12 0.00             0.15 0.15 0.12 0.10 0.00             0.12 0.12 0.10 0.08 0.00             0.00 0.00 0.00 0.00 0.00
+
+# Cohesion (5x5 matrix) - No cohesion with walls --- Type 5 is for Visualization
+fix     m7 all property/global cohesionEnergyDensity peratomtypepair 5              1000    600     300    150    0               600    500     250    100    0               300    250     150     75    0               150    100      75     50    0                 0      0       0      0    0
+
+#=============================================================================
+# MAGNETIC PROPERTIES (CORRECTED)
+#=============================================================================
+
+# CRITICAL CORRECTION: Magnetic susceptibility is now NEGATIVE (diamagnetic)
+# Lunar regolith is DIAMAGNETIC because it's dominated by silicates
+# Reference: Collinson (1970, Science 167), Fuller et al. (2010)
+# Bulk χ ≈ -3e-5 to -5e-5 for typical regolith
+# IMPORTANT: χ is independent of particle size (it's a material property)
+fix     mag_sus all property/global magneticSusceptibility peratomtype -3.5e-5 -3.5e-5 -3.5e-5 -3.5e-5 -3.5e-5
+
+# Magnetic permeability (relative) - for reference, not used in force calc
+fix     mag_perm all property/global magneticPermeability peratomtype 1.0 1.0 1.0 1.0 1.0
+
+#=============================================================================
+# CONTACT PHYSICS MODEL
+#=============================================================================
+
+# Hertzian contact with SJKR cohesion
+pair_style gran model hertz tangential history cohesion sjkr rolling_friction cdt
+WARNING: 
+	The contact model you specified is not located in any whitelist.
+	Because of this the model will be run in an unoptimized version (increasing runtime by up to 20%).
+	In order to optimize this model you have the following options:
+		(i)  Run the genAutoExamplesWhitelist.sh script in your LIGGGHTS(R) source folder to automatically parse the input script
+		(ii) Add the model combination by hand to your style_contact_model_user.whitelist that can be found in your LIGGGHTS(R) source folder
+	If you perform one of the steps above LIGGGHTS(R) needs to be recompiled to generate the optimized code.
+
+ (./src/contact_models.h:364)
+pair_coeff * *
+
+#=============================================================================
+# LUNAR ENVIRONMENT
+#=============================================================================
+
+# Lunar gravity (1.625 m/s² = 1/6 Earth gravity)
+fix     lunar_gravity all gravity 1.625 vector 0.0 0.0 -1.0
+
+# Containment walls
+fix     wall_bottom all wall/gran model hertz tangential history primitive type 1 zplane 0.001
+fix     wall_top all wall/gran model hertz tangential history primitive type 1 zplane 0.149
+fix     wall_xlo all wall/gran model hertz tangential history primitive type 1 xplane -0.049
+fix     wall_xhi all wall/gran model hertz tangential history primitive type 1 xplane  0.049
+fix     wall_ylo all wall/gran model hertz tangential history primitive type 1 yplane -0.049
+fix     wall_yhi all wall/gran model hertz tangential history primitive type 1 yplane  0.049
+
+#=============================================================================
+# PARTICLE SIZE DISTRIBUTION
+#=============================================================================
+
+# Type 1: Fine dust (20 μm)
+fix pts_fine all particletemplate/sphere 15485863 atom_type 1     density constant 3200 radius constant 2.0e-5 volume_limit 1e-20
+
+# Type 2: Medium sand (75 μm)
+fix pts_medium all particletemplate/sphere 15485867 atom_type 2     density constant 3100 radius constant 7.5e-5 volume_limit 1e-20
+
+# Type 3: Coarse sand (150 μm)
+fix pts_coarse all particletemplate/sphere 32452843 atom_type 3     density constant 3000 radius constant 1.5e-4 volume_limit 1e-20
+
+# Type 4: Very coarse (300 μm)
+fix pts_vcoarse all particletemplate/sphere 67867967 atom_type 4     density constant 2900 radius constant 3.0e-4 volume_limit 1e-20
+
+# Realistic lunar dust distribution - MORE COARSE PARTICLES for magnetic effects
+fix     lunar_dust_distribution all particledistribution/discrete 32452867 4         pts_fine 0.20 pts_medium 0.30 pts_coarse 0.30 pts_vcoarse 0.20
+
+#=============================================================================
+# PARTICLE GROUPS
+#=============================================================================
+
+group   type1_particles type 1
+0 atoms in group type1_particles
+group   type2_particles type 2
+0 atoms in group type2_particles
+group   type3_particles type 3
+0 atoms in group type3_particles
+group   type4_particles type 4
+0 atoms in group type4_particles
+group   nve_group region reg
+0 atoms in group nve_group
+
+#=============================================================================
+# PARTICLE INSERTION
+#=============================================================================
+
+region  insertion_region block -0.045 0.045 -0.045 0.045 0.08 0.14 units box
+
+fix     particle_insertion nve_group insert/pack seed 49979687         distributiontemplate lunar_dust_distribution         maxattempt 200 insert_every 2000 overlapcheck yes all_in yes         vel constant 0.0 0.0 -0.001         region insertion_region particles_in_region 500 ntry_mc 50000
+# If you want more particles, then switch 500 to 2000 or more
+
+#=============================================================================
+# INTEGRATION
+#=============================================================================
+
+fix     integr nve_group nve/sphere
+
+#=============================================================================
+# OUTPUT AND MONITORING
+#=============================================================================
+
+compute rke all erotate/sphere
+
+thermo_style    custom step atoms ke c_rke vol
+thermo          10000
+thermo_modify   lost ignore norm no
+
+run 1
+Setting up run at Wed Oct 15 23:12:15 2025
+
+INFO: Particle insertion particle_insertion: inserting every 2000 steps
+Memory usage per processor = 8.20686 Mbytes
+    Step    Atoms         KinEng            rke         Volume 
+       0        0              0              0       0.001936 
+INFO: Particle insertion particle_insertion: inserted 500 particle templates (mass 4.989887e-07) at step 1
+ - a total of 500 particle templates (mass 4.989887e-07) inserted so far.
+       1      500  2.4989994e-13              0       0.001936 
+Loop time of 0.020104 on 1 procs for 1 steps with 500 atoms, finish time Wed Oct 15 23:12:15 2025
+
+
+Pair  time (%) = 2.6475e-05 (0.131691)
+Neigh time (%) = 0.00107943 (5.36927)
+Comm  time (%) = 7.937e-06 (0.0394798)
+Outpt time (%) = 8.4828e-05 (0.421947)
+Other time (%) = 0.0189053 (94.0376)
+
+Nlocal:    500 ave 500 max 500 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:    0 ave 0 max 0 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:    13 ave 13 max 13 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 13
+Ave neighs/atom = 0.026
+Neighbor list builds = 1
+Dangerous builds = 0

@@ -227,7 +227,8 @@ def parse_liggghts_complete(liggghts_file='in.lunar_dust_magnetic'):
 
 def preprocess_magnetic_field(field_file='B_output.txt', force_multiplier=0.1, 
                               liggghts_file='in.lunar_dust_magnetic', 
-                              peak_threshold=0.20, calc_freq=10):
+                              peak_threshold=0.20, calc_freq=10,
+                              create_field_viz=True):  
     """
     Preprocess FEM magnetic field data for LIGGGHTS with full scientific accuracy.
     
@@ -558,7 +559,7 @@ def preprocess_magnetic_field(field_file='B_output.txt', force_multiplier=0.1,
     save_field_data(x_unique, y_unique, Bx_grid, By_grid, B_grid, gradBx, gradBy, grad_mag)
     create_liggghts_integration(x_unique, y_unique, Bx_grid, By_grid, gradBx, gradBy, 
                                 force_multiplier, config, peak_threshold, peak_width, 
-                                calc_freq, damping_coeff)
+                                calc_freq, damping_coeff, create_field_viz)
     create_visualizations(x_unique, y_unique, Bx_grid, By_grid, B_grid, gradBx, gradBy, 
                          grad_mag, peak_threshold, peak_width, force_multiplier, config)
     generate_physics_summary(B_grid, gradBx, gradBy, force_multiplier, config)
@@ -583,7 +584,7 @@ def save_field_data(x, y, Bx, By, B, gradBx, gradBy, grad_mag):
     print("✓ Field data saved: field_data.npz")
 
 def create_liggghts_integration(x_fem, y_fem, Bx, By, gradBx, gradBy, force_mult, 
-                                config, peak_threshold, peak_width, calc_freq, damping_coeff):
+                                config, peak_threshold, peak_width, calc_freq, damping_coeff, create_field_viz):
     """Create LIGGGHTS command file with optimized force calculation"""
     
     particles = config['particles']
@@ -664,6 +665,21 @@ def create_liggghts_integration(x_fem, y_fem, Bx, By, gradBx, gradBy, force_mult
         f.write("# Auto-generated from FEM and DEM configuration files\n")
         f.write(f"# Force update frequency: every {calc_freq} timesteps\n")
         f.write("# " + "="*74 + "\n\n")
+
+        if create_field_viz:
+            f.write("\n# === NEIGHBOR LIST PRE-CONFIGURATION ===\n")
+            f.write("# Increase capacity before creating visualization atoms\n")
+            
+            x_unique = np.sort(np.unique(x_fem))
+            y_unique = np.sort(np.unique(y_fem))
+            subsample = 3  # Reduce by 3x in each dimension = 9x total reduction
+            x_viz = x_unique[::subsample]
+            y_viz = y_unique[::subsample]
+            n_viz = len(x_viz) * len(y_viz)
+            
+            f.write(f"# Visualization atoms: {n_viz} (subsampled from {len(x_unique)}×{len(y_unique)})\n")
+            f.write(f"neigh_modify one 10000\n")
+            f.write(f"neigh_modify page 200000\n\n")
         
         f.write("print \"===================================================================================\"\n")
         f.write("print \"ACTIVATING MAGNETIC FIELD (SCIENTIFICALLY ACCURATE PHYSICS)\"\n")
@@ -910,63 +926,59 @@ def create_liggghts_integration(x_fem, y_fem, Bx, By, gradBx, gradBy, force_mult
         f.write("variable y_mapped atom \"y*v_scale_y+v_offset_y\"  # DEM→FEM Y coordinate\n")
         f.write("variable grad_check atom \"sqrt(v_BgradB_x*v_BgradB_x+v_BgradB_y*v_BgradB_y)\"  # Field gradient magnitude\n\n")
 
-        #'''
         # ========================================================================
         # FIELD GRID VISUALIZATION (creates dummy particles to show field shape)
         # ========================================================================
-        # Calculate grid dimensions
-        x_unique = np.sort(np.unique(x_fem))
-        y_unique = np.sort(np.unique(y_fem))
-        grid_spacing = x_unique[1]-x_unique[0]  # Assume uniform spacing (should be same for y-direction too)
-        x_grid_points = int((x_fem_max - x_fem_min) / grid_spacing) + 1
-        y_grid_points = int((y_fem_max - y_fem_min) / grid_spacing) + 1
+        if create_field_viz:
+            f.write("\n# === FIELD GRID FOR VISUALIZATION (OPTIMIZED) ===\n")
+            f.write(f"# Subsampled {subsample}x to reduce atom count\n")
+            
+            grid_spacing = x_viz[1] - x_viz[0] if len(x_viz) > 1 else 0.001
+            
+            # CRITICAL FIX: Position visualization grid BELOW particles
+            z_bottom_wall = domain['z_min']
+            z_viz_offset = 0.000  # 1 cm
+            z_viz_bottom = z_bottom_wall + z_viz_offset    # above bottom wall
+            z_viz_top = z_viz_bottom + 0.001  # 1mm thick
+            
+            f.write(f"# Positioned {z_viz_offset*1000:.1f} mm below bottom wall to avoid particle deletion\n")
+            f.write(f"# Visualization plane: Z=[{z_viz_bottom:.6f}, {z_viz_top:.6f}] m\n\n")
+            
+            region_name = "field_viz_region"
+            f.write(f"region {region_name} block ")
+            f.write(f"{x_viz.min()-grid_spacing/2:.8f} {x_viz.max()+grid_spacing/2:.8f} ")
+            f.write(f"{y_viz.min()-grid_spacing/2:.8f} {y_viz.max()+grid_spacing/2:.8f} ")
+            f.write(f"{z_viz_bottom:.8f} {z_viz_top:.8f} units box\n")
+            
+            f.write(f"lattice sc {grid_spacing:.8f}\n")
+            f.write(f"create_atoms 5 region {region_name}\n")
+            f.write("neigh_modify exclude type 5 5\n")
+            f.write(f"lattice none 1.0  # Reset lattice\n\n")
 
-        f.write(f"# Grid: {x_grid_points} × {y_grid_points} visualization points\n")
-        f.write(f"# Creating via region + lattice for efficiency\n\n")
+            f.write("# Freeze visualization particles\n")
+            f.write("group field_viz type 5\n")
+            f.write("fix freeze_viz field_viz setforce 0.0 0.0 0.0\n")
+            f.write("velocity field_viz set 0.0 0.0 0.0\n\n")
 
-        # === CREATE FIELD VISUALIZATION PARTICLES ===
-        f.write("# Group field_viz will be created after atoms are added\n")
-        f.write("# Create dummy atoms at FEM grid points for visualization\n")
+            f.write("# === MAGNETIC FIELD GEOMETRY VISUALIZATION ===\n")
+            f.write("# Type 5 particles show field structure as a 2D grid BELOW the simulation\n")
+            f.write(f"# Grid location: {z_viz_offset*1000:.1f} mm below bottom wall (Z={z_bottom_wall:.4f} m)\n")
+            f.write(f"# This prevents interference with real particles (types 1-4)\n\n")
 
-        f.write("\n# === FIELD GRID FOR VISUALIZATION ===\n")
+            f.write(f"# Coil projection on visualization plane:\n")
+            f.write(f"#   X: [{x_fem_min:.4f}, {x_fem_max:.4f}] m ({coil_width_x*100:.1f} cm wide)\n")
+            f.write(f"#   Y: [{y_fem_min:.4f}, {y_fem_max:.4f}] m ({coil_width_y*100:.1f} cm wide)\n")
+            f.write(f"#   Z: {(z_viz_bottom+z_viz_top)/2:.4f} m (visualization plane)\n\n")
 
-        # Use region + create_atoms with lattice (MUCH faster than 400+ individual commands)
-        region_name = "field_viz_region"
-        f.write(f"region {region_name} block {x_fem_min-grid_spacing/2:.8f} {x_fem_max+grid_spacing/2:.8f} ")
-        f.write(f"{y_fem_min-grid_spacing/2:.8f} {y_fem_max+grid_spacing/2:.8f} ")
-        f.write(f"0.075 0.076 units box\n")
-
-        # Map FEM → DEM coordinates
-        x_dem_min = (x_fem_min - offset_x) / scale_x
-        x_dem_max = (x_fem_max - offset_x) / scale_x
-        y_dem_min = (y_fem_min - offset_y) / scale_y
-        y_dem_max = (y_fem_max - offset_y) / scale_y
-
-        f.write(f"lattice sc {grid_spacing:.8f}\n")  # Simple cubic lattice
-        f.write(f"create_atoms 5 region {region_name}\n")
-        f.write("neigh_modify exclude type 5 5\n")
-        f.write(f"lattice none 1.0  # Reset lattice\n\n")
-
-        f.write("# Freeze visualization particles\n")
-        f.write("group field_viz type 5\n")
-        f.write("fix freeze_viz field_viz setforce 0.0 0.0 0.0\n")
-        f.write("velocity field_viz set 0.0 0.0 0.0\n\n")
-
-        f.write("# === MAGNETIC FIELD GEOMETRY VISUALIZATION ===\n")
-        f.write("# Type 5 particles show the actual magnetic field structure\n")
-        f.write(f"# These are frozen in space and colored by field strength\n\n")
-
-        f.write(f"# Coil positioned on bottom wall:\n")
-        f.write(f"#   X: [{x_fem_min:.4f}, {x_fem_max:.4f}] m ({coil_width_x*100:.1f} cm wide)\n")
-        f.write(f"#   Y: [{y_fem_min:.4f}, {y_fem_max:.4f}] m ({coil_width_y*100:.1f} cm wide)\n")
-        f.write(f"#   Z: {z_bottom_wall:.4f} m (on bottom wall)\n\n")
-
-        f.write("# In ParaView:\n")
-        f.write("#   1. Filter by 'type == 5' to see only field visualization\n")
-        f.write("#   2. Color by 'v_B_magnitude' to see field strength\n")
-        f.write("#   3. Add Glyph (arrows) using v_fx_mag_viz, v_fy_mag_viz\n")
-        f.write("#   4. Filter by 'type != 5' to see only real particles\n\n")
-        #'''
+            f.write("# In ParaView:\n")
+            f.write("#   1. Filter by 'type == 5' to see field visualization grid\n")
+            f.write("#   2. Color by 'v_B_magnitude' to see field strength\n")
+            f.write("#   3. Filter by 'type != 5' to see actual particles\n")
+            f.write("#   4. Add Glyph (arrows) to show force vectors\n\n")
+        else:
+            f.write("\n# === FIELD VISUALIZATION DISABLED ===\n")
+            f.write("# To enable, set create_field_viz=True in preprocessor\n")
+            f.write("# Visualization atoms would show field structure as type 5 particles\n\n")
 
         f.write("print \"✓ Magnetic field successfully activated!\"\n")
         f.write("print \"  - Force formula: F = (χ·V/μ₀)·(B·∇)B\"\n")
@@ -1324,6 +1336,7 @@ def main():
     liggghts_file = 'in.lunar_dust_magnetic'
     peak_threshold = 0.20  # 20% of max gradient
     calc_freq = 100
+    create_field_viz=True
     
     # Parse command-line arguments
     if len(sys.argv) > 1:
@@ -1343,6 +1356,18 @@ def main():
                 peak_threshold = 0.20
         except ValueError:
             print("⚠ Invalid peak_threshold, using default 0.20")
+    if len(sys.argv) > 5:
+        try:
+            calc_freq = int(sys.argv[5])
+            if calc_freq < 1:
+                print("⚠ calc_freq should be >= 1, using default 100")
+                calc_freq = 100
+        except ValueError:
+            print("⚠ Invalid calc_freq, using default 100")
+    if len(sys.argv) > 6:
+        create_field_viz = sys.argv[6].lower() in ['true', '1', 'yes']
+    else:
+        create_field_viz = False
     
     # Validate input files
     if not os.path.exists(field_file):
@@ -1371,7 +1396,8 @@ def main():
             force_multiplier=force_multiplier,
             liggghts_file=liggghts_file,
             peak_threshold=peak_threshold,
-            calc_freq=calc_freq
+            calc_freq=calc_freq,
+            create_field_viz=create_field_viz
         )
         
         if success:

@@ -27,7 +27,7 @@ create_box      5 reg
 
 # Neighbor list settings
 neighbor        0.002 bin
-neigh_modify    delay 0
+neigh_modify    delay 0 
 
 #=============================================================================
 # REALISTIC LUNAR MATERIAL PROPERTIES
