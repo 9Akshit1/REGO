@@ -637,9 +637,8 @@ def create_liggghts_integration(x_fem, y_fem, Bx, By, gradBx, gradBy, force_mult
         print(f"\n⚠ WARNING: Coil may be too large for DEM box!")
         print(f"  Coil size: {coil_width_x*100:.1f} × {coil_width_y*100:.1f} cm")
         print(f"  DEM box:   {dem_width_x*100:.1f} × {dem_width_y*100:.1f} cm")
-        # Optional: Add scaling here if needed
-        scale_x = min(1.0, dem_width_x * 0.9 / coil_width_x)
-        scale_y = min(1.0, dem_width_y * 0.9 / coil_width_y)
+        scale_x = dem_width_x / coil_width_x
+        scale_y = dem_width_y / coil_width_y
         print(f"  Applying scaling: {scale_x:.3f} (X), {scale_y:.3f} (Y)")
     else:
         scale_x = 1.0
@@ -647,8 +646,8 @@ def create_liggghts_integration(x_fem, y_fem, Bx, By, gradBx, gradBy, force_mult
         print(f"\n✓ Coil fits in DEM box (no scaling needed)")
 
     # Mapping: Align coil center with DEM box center (XY plane)
-    offset_x = coil_center_x - dem_center_x * scale_x
-    offset_y = coil_center_y - dem_center_y * scale_y
+    offset_x = coil_center_x - dem_center_x
+    offset_y = coil_center_y - dem_center_y
 
     print(f"  ✓ COIL PLACEMENT:")
     print(f"    Coil center (FEM): ({coil_center_x:.4f}, {coil_center_y:.4f}) m")
@@ -876,8 +875,9 @@ def create_liggghts_integration(x_fem, y_fem, Bx, By, gradBx, gradBy, force_mult
         f.write("variable ramp_time equal \"(step-v_step_phase2_start)*(step>v_step_phase2_start)\"\n")
         f.write("variable ramp_progress equal \"v_ramp_time/v_ramp_duration*(v_ramp_time<v_ramp_duration)+1.0*(v_ramp_time>=v_ramp_duration)\"\n\n")
 
-        # Around line 580 in create_liggghts_integration()
-        # Replace the force application loop with:
+        f.write("# Debug: Monitor ramp progress\n")
+        f.write("variable ramp_pct equal \"v_ramp_progress*100.0\"\n")
+        f.write("variable force_check equal \"c_fx_sum_t4\"\n\n")
 
         f.write("# === FORCE APPLICATION WITH SMOOTH RAMP ===\n")
         for ptype in particles.keys():
@@ -925,60 +925,132 @@ def create_liggghts_integration(x_fem, y_fem, Bx, By, gradBx, gradBy, force_mult
         f.write("variable x_mapped atom \"x*v_scale_x+v_offset_x\"  # DEM→FEM X coordinate\n")
         f.write("variable y_mapped atom \"y*v_scale_y+v_offset_y\"  # DEM→FEM Y coordinate\n")
         f.write("variable grad_check atom \"sqrt(v_BgradB_x*v_BgradB_x+v_BgradB_y*v_BgradB_y)\"  # Field gradient magnitude\n\n")
-
+            
         # ========================================================================
-        # FIELD GRID VISUALIZATION (creates dummy particles to show field shape)
+        # ACTIVE FIELD VISUALIZATION - PARTICLES RESPOND TO FIELD
         # ========================================================================
         if create_field_viz:
-            f.write("\n# === FIELD GRID FOR VISUALIZATION (OPTIMIZED) ===\n")
-            f.write(f"# Subsampled {subsample}x to reduce atom count\n")
+            f.write("\n# === ACTIVE FIELD VISUALIZATION (PHYSICS-BASED) ===\n")
+            f.write("# Type 5 particles RESPOND to magnetic field and self-organize\n")
+            f.write("# This validates field placement AND shows field structure naturally\n\n")
             
-            grid_spacing = x_viz[1] - x_viz[0] if len(x_viz) > 1 else 0.001
-            
-            # CRITICAL FIX: Position visualization grid BELOW particles
+            # Position visualization plane
             z_bottom_wall = domain['z_min']
-            z_viz_offset = 0.000  # 1 cm
-            z_viz_bottom = z_bottom_wall + z_viz_offset    # above bottom wall
-            z_viz_top = z_viz_bottom + 0.001  # 1mm thick
+            z_viz = z_bottom_wall + 0.0001  # 0.1mm above bottom
             
-            f.write(f"# Positioned {z_viz_offset*1000:.1f} mm below bottom wall to avoid particle deletion\n")
-            f.write(f"# Visualization plane: Z=[{z_viz_bottom:.6f}, {z_viz_top:.6f}] m\n\n")
+            f.write(f"# Visualization plane: Z={z_viz:.6f} m\n\n")
             
-            region_name = "field_viz_region"
-            f.write(f"region {region_name} block ")
-            f.write(f"{x_viz.min()-grid_spacing/2:.8f} {x_viz.max()+grid_spacing/2:.8f} ")
-            f.write(f"{y_viz.min()-grid_spacing/2:.8f} {y_viz.max()+grid_spacing/2:.8f} ")
-            f.write(f"{z_viz_bottom:.8f} {z_viz_top:.8f} units box\n")
+            # Create UNIFORM GRID of visualization particles
+            # Subsample FEM grid for performance
+            subsample = 3  # Every 3rd point = 9x fewer particles
+            x_viz = x_fem[::subsample]
+            y_viz = y_fem[::subsample]
+            n_viz = len(x_viz) * len(y_viz)
             
-            f.write(f"lattice sc {grid_spacing:.8f}\n")
-            f.write(f"create_atoms 5 region {region_name}\n")
-            f.write("neigh_modify exclude type 5 5\n")
-            f.write(f"lattice none 1.0  # Reset lattice\n\n")
-
-            f.write("# Freeze visualization particles\n")
-            f.write("group field_viz type 5\n")
-            f.write("fix freeze_viz field_viz setforce 0.0 0.0 0.0\n")
-            f.write("velocity field_viz set 0.0 0.0 0.0\n\n")
-
-            f.write("# === MAGNETIC FIELD GEOMETRY VISUALIZATION ===\n")
-            f.write("# Type 5 particles show field structure as a 2D grid BELOW the simulation\n")
-            f.write(f"# Grid location: {z_viz_offset*1000:.1f} mm below bottom wall (Z={z_bottom_wall:.4f} m)\n")
-            f.write(f"# This prevents interference with real particles (types 1-4)\n\n")
-
-            f.write(f"# Coil projection on visualization plane:\n")
-            f.write(f"#   X: [{x_fem_min:.4f}, {x_fem_max:.4f}] m ({coil_width_x*100:.1f} cm wide)\n")
-            f.write(f"#   Y: [{y_fem_min:.4f}, {y_fem_max:.4f}] m ({coil_width_y*100:.1f} cm wide)\n")
-            f.write(f"#   Z: {(z_viz_bottom+z_viz_top)/2:.4f} m (visualization plane)\n\n")
-
-            f.write("# In ParaView:\n")
-            f.write("#   1. Filter by 'type == 5' to see field visualization grid\n")
-            f.write("#   2. Color by 'v_B_magnitude' to see field strength\n")
-            f.write("#   3. Filter by 'type != 5' to see actual particles\n")
-            f.write("#   4. Add Glyph (arrows) to show force vectors\n\n")
+            print(f"\n  Creating {len(x_viz)}×{len(y_viz)} = {n_viz} visualization particles")
+            print(f"  Particles will self-organize according to field strength")
+            print(f"  High-field regions → particles cluster (high density)")
+            print(f"  Low-field regions → particles disperse (low density)")
+            
+            f.write(f"# Creating {len(x_viz)}×{len(y_viz)} = {n_viz} visualization particles\n")
+            f.write(f"# Particles will self-organize according to field strength\n")
+            f.write(f"# High-field regions → particles cluster (high density)\n")
+            f.write(f"# Low-field regions → particles disperse (low density)\n\n")
+            
+            # Create particles in uniform grid
+            batch_size = 100
+            particle_count = 0
+            for i, y_pos in enumerate(y_viz):
+                for j, x_pos in enumerate(x_viz):
+                    f.write(f"create_atoms 5 single {x_pos:.8f} {y_pos:.8f} {z_viz:.8f}\n")
+                    particle_count += 1
+                    if particle_count % batch_size == 0:
+                        progress_pct = 100 * particle_count / n_viz
+                        f.write(f"# Progress: {particle_count}/{n_viz} particles created\n")
+            
+            f.write(f"\n# Total: {n_viz} visualization particles created\n\n")
+            
+            # Group visualization particles
+            f.write("# Group visualization particles\n")
+            f.write("group field_viz type 5\n\n")
+            
+            # === MAKE VISUALIZATION PARTICLES PARAMAGNETIC ===
+            # Type 5 has POSITIVE χ → attracted to high-field regions
+            # This causes natural clustering at coil edges/peaks
+            chi_viz = 3.5e1  # VERY strong paramagnetic 
+            r_viz = 1.0e-4    # 100 μm radius
+            rho_viz = 3000    # Same density as dust
+            V_viz = (4/3) * np.pi * r_viz**3
+            coeff_viz = (chi_viz * V_viz / MU0) * force_mult
+            
+            f.write("# === MAKE VISUALIZATION PARTICLES PARAMAGNETIC ===\n")
+            f.write("# Type 5 has POSITIVE χ → attracted to high-field regions\n")
+            f.write("# This causes natural clustering at coil edges/peaks\n")
+            f.write(f"variable chi_viz equal {chi_viz:.9e}  # Paramagnetic\n")
+            f.write(f"variable r_viz equal {r_viz:.9e}      # {r_viz*1e6:.0f} μm radius\n")
+            f.write(f"variable V_viz equal {V_viz:.12e}     # Volume\n")
+            f.write(f"variable coeff_viz equal {coeff_viz:.12e}  # χ·V/μ₀\n\n")
+            
+            # Visualization particles experience magnetic force
+            f.write("# Visualization particles experience magnetic force\n")
+            f.write("variable fx_viz_mag atom \"v_coeff_viz*v_BgradB_x*v_force_mult\"\n")
+            f.write("variable fy_viz_mag atom \"v_coeff_viz*v_BgradB_y*v_force_mult\"\n")
+            f.write("fix mag_viz_force field_viz addforce v_fx_viz_mag v_fy_viz_mag 0.0\n\n")
+            
+            # Heavy damping for fast convergence to equilibrium
+            damping_viz = damping_coeff * 1e-4  # Lighter damping = faster movement
+            f.write("# Heavy damping for fast convergence to equilibrium\n")
+            f.write(f"variable damping_viz equal {damping_viz:.9e}\n")
+            f.write("variable vx_damp_viz atom \"-v_damping_viz*vx\"\n")
+            f.write("variable vy_damp_viz atom \"-v_damping_viz*vy\"\n")
+            f.write("fix damp_viz_force field_viz addforce v_vx_damp_viz v_vy_damp_viz 0.0\n\n")
+            
+            # Keep visualization particles on XY plane
+            f.write("# Keep visualization particles on XY plane\n")
+            f.write("fix freeze_viz_z field_viz setforce NULL NULL 0.0\n")
+            f.write("velocity field_viz set NULL NULL 0.0\n\n")
+            
+            # === INTER-PARTICLE REPULSION (prevents overlap) ===
+            f.write("# === INTER-PARTICLE REPULSION (prevents overlap) ===\n")
+            f.write("# Short-range repulsion keeps particles from clustering too tightly\n")
+            f.write("variable r_cutoff equal 0.0003  # 0.3 mm cutoff\n")
+            f.write("variable k_repel equal 1.0e-6   # Repulsion strength\n\n")
+            
+            # Expected behavior
+            max_F_viz = abs(coeff_viz * grad_mag.max())
+            m_viz = rho_viz * V_viz
+            v_eq_viz = max_F_viz / damping_viz if damping_viz > 0 else 0
+            t_settle_viz = (5.0 * m_viz / damping_viz) if damping_viz > 0 else 0
+            
+            f.write("# === VISUALIZATION PARTICLE BEHAVIOR ===\n")
+            f.write(f"# Chi: {chi_viz:.2e} (PARAMAGNETIC - attracted to high field)\n")
+            f.write("# Expected behavior:\n")
+            f.write("#   1. Initially spread uniformly\n")
+            f.write("#   2. Drift toward high-field regions (coil edges)\n")
+            f.write("#   3. Form dense clusters at peaks\n")
+            f.write("#   4. Sparse in low-field areas (coil center)\n")
+            f.write("#   5. Final distribution shows field structure\n\n")
+            
+            f.write("# Particle dynamics:\n")
+            f.write(f"#   Max force: {max_F_viz:.2e} N\n")
+            f.write(f"#   Equilibrium velocity: {v_eq_viz*1e3:.1f} mm/s\n")
+            f.write(f"#   Settling time: ~{t_settle_viz:.1f} seconds\n\n")
+            
+            f.write("# === VALIDATION METRICS ===\n")
+            f.write("# Check these in ParaView to verify field is working:\n")
+            f.write("#   1. Type 5 particles should MOVE during Phase 2\n")
+            f.write("#   2. Final density highest at coil edges (field peaks)\n")
+            f.write("#   3. Low density in coil center (low field)\n")
+            f.write("#   4. If particles don't move → field not being applied!\n\n")
+            
+            f.write("# Visualization plane:\n")
+            f.write(f"#   Z: {z_viz:.6f} m (just above bottom wall)\n")
+            f.write(f"#   X: [{x_fem.min():.4f}, {x_fem.max():.4f}] m\n")
+            f.write(f"#   Y: [{y_fem.min():.4f}, {y_fem.max():.4f}] m\n\n")
+            
         else:
-            f.write("\n# === FIELD VISUALIZATION DISABLED ===\n")
-            f.write("# To enable, set create_field_viz=True in preprocessor\n")
-            f.write("# Visualization atoms would show field structure as type 5 particles\n\n")
+            f.write("\n# === FIELD VISUALIZATION DISABLED ===\n\n")
+            f.write("# To enable, set create_field_viz=True in preprocessor\n\n")
 
         f.write("print \"✓ Magnetic field successfully activated!\"\n")
         f.write("print \"  - Force formula: F = (χ·V/μ₀)·(B·∇)B\"\n")
@@ -1397,7 +1469,7 @@ def main():
             liggghts_file=liggghts_file,
             peak_threshold=peak_threshold,
             calc_freq=calc_freq,
-            create_field_viz=create_field_viz
+            create_field_viz=create_field_viz         
         )
         
         if success:

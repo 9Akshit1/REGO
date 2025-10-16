@@ -16,7 +16,7 @@ DEM SIMULATION PARAMETERS:
   Domain: [-0.0550, 0.0550] × [-0.0550, 0.0550] m
   Gravity: 1.625000 m/s²
   Particle types: 4
-  Force multiplier: 10.000000
+  Force multiplier: 1000.000000
   Timestep: 1.00e-06 s
 
 MAGNETIC PHYSICS:
@@ -44,14 +44,14 @@ Type 1: pts_fine
     Coefficient χ·V/μ₀: -9.333333e-13 m³/H
 
   Force analysis:
-    F_magnetic (max): 3.345308e-07 N = 334530.81 pN
+    F_magnetic (max): 3.345308e-05 N = 33453080.51 pN
     F_gravity: 1.742537e-10 N = 174.25 pN
-    Ratio F_mag/F_grav: 1919.792
+    Ratio F_mag/F_grav: 191979.199
 
   Motion characteristics:
-    Max acceleration: 3.119662e+03 m/s²
+    Max acceleration: 3.119662e+05 m/s²
     Time to 1 mm/s: 0.000 s = 0 timesteps
-    → STRONG magnetic effect (1919.8× gravity)
+    → STRONG magnetic effect (191979.2× gravity)
     → Expect significant particle reorganization
 
 Type 2: pts_medium
@@ -67,14 +67,14 @@ Type 2: pts_medium
     Coefficient χ·V/μ₀: -4.921875e-11 m³/H
 
   Force analysis:
-    F_magnetic (max): 1.764127e-05 N = 17641272.93 pN
+    F_magnetic (max): 1.764127e-03 N = 1764127292.70 pN
     F_gravity: 8.901997e-09 N = 8902.00 pN
-    Ratio F_mag/F_grav: 1981.721
+    Ratio F_mag/F_grav: 198172.077
 
   Motion characteristics:
-    Max acceleration: 3.220296e+03 m/s²
+    Max acceleration: 3.220296e+05 m/s²
     Time to 1 mm/s: 0.000 s = 0 timesteps
-    → STRONG magnetic effect (1981.7× gravity)
+    → STRONG magnetic effect (198172.1× gravity)
     → Expect significant particle reorganization
 
 Type 3: pts_coarse
@@ -90,14 +90,14 @@ Type 3: pts_coarse
     Coefficient χ·V/μ₀: -3.937500e-10 m³/H
 
   Force analysis:
-    F_magnetic (max): 1.411302e-04 N = 141130183.42 pN
+    F_magnetic (max): 1.411302e-02 N = 14113018341.63 pN
     F_gravity: 6.891869e-08 N = 68918.69 pN
-    Ratio F_mag/F_grav: 2047.778
+    Ratio F_mag/F_grav: 204777.813
 
   Motion characteristics:
-    Max acceleration: 3.327639e+03 m/s²
+    Max acceleration: 3.327639e+05 m/s²
     Time to 1 mm/s: 0.000 s = 0 timesteps
-    → STRONG magnetic effect (2047.8× gravity)
+    → STRONG magnetic effect (204777.8× gravity)
     → Expect significant particle reorganization
 
 Type 4: pts_vcoarse
@@ -113,14 +113,14 @@ Type 4: pts_vcoarse
     Coefficient χ·V/μ₀: -3.150000e-09 m³/H
 
   Force analysis:
-    F_magnetic (max): 1.129041e-03 N = 1129041467.33 pN
+    F_magnetic (max): 1.129041e-01 N = 112904146733.04 pN
     F_gravity: 5.329712e-07 N = 532971.19 pN
-    Ratio F_mag/F_grav: 2118.391
+    Ratio F_mag/F_grav: 211839.116
 
   Motion characteristics:
-    Max acceleration: 3.442386e+03 m/s²
+    Max acceleration: 3.442386e+05 m/s²
     Time to 1 mm/s: 0.000 s = 0 timesteps
-    → STRONG magnetic effect (2118.4× gravity)
+    → STRONG magnetic effect (211839.1× gravity)
     → Expect significant particle reorganization
 
 ================================================================================

@@ -279,7 +279,7 @@ print "=========================================================================
 include magnetic_field_apply.lmp
 
 # Update thermodynamic output to track forces
-thermo_style custom step atoms ke c_rke vol c_fx_sum_t4 c_fy_sum_t4
+thermo_style custom step atoms ke c_rke vol c_fx_sum_t4 c_fy_sum_t4 v_ramp_pct
 thermo 5000
 
 print " "
