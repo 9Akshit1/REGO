@@ -1,0 +1,64 @@
+Loading data model 'Flux_model.stp'
+Recording commands in 'C:/Users/eruku/Akshith/REGO/Altair/Flux2D_log.py'
+ 
+/----------------------------------------------------------------------------------------------------------------------------\
+| FLUX2D_25.1.1 : 2D Finite Element Electromagnetism                                                                         |
+| 2048 MiB N. + 127 MiB C. + 1024 MiB J.                                                                                     |
+| Build 2508161022 Task/2025.1.1  Change 308 (8a7884) Setup Change 312 (59ab10) Win64 4/12 cores AKSHERU-597_X9J:11380 eruku |
+\----------------------------------------------------------------------------------------------------------------------------/
+ 
+14:14:38       0 sec. FLUX2D_25.1.1 kernel initialized
+
+Flux2D (application 2025.1.1) running
+
+Loading project 'C:/Users/eruku/Akshith/REGO/Altair/Problem1.FLU'
+14:14:41       3 sec. Start reading ...
+14:14:42       3 sec. ... end reading
+Updating the data structure: merge standard database
+Value of parameter CW : 20
+Value of parameter DD : 100
+Value of parameter G : 3
+Value of parameter I : 1
+Value of parameter N : 300
+... end loading project
+   Scenario[CHANGE_AIRGAP] modified
+17:33:23   11924 sec. Start reading ...
+17:33:23   11924 sec. ... end reading
+The scenario is already treated: it has already results.
+Before activating the [Solve] command, you must first
+   delete all the stored results using the
+   [Delete all results] command
+or to continue to compute [Continue to solve]
+or to iterate on the current solution (linear and/or non
+   linear), [Iterate on one step]
+Value of parameter CW : 20
+Value of parameter DD : 100
+Value of parameter G : 3
+Value of parameter I : 1
+Value of parameter N : 300
+Closing project
+Close of C:/Users/eruku/Akshith/REGO/Altair/Problem1
+... end closing project
+Maximum use of 302 MiB. in numerical memory
+For the dynamic table ID 16566
+Maximum use of 7 MiB. in character memory
+For the dynamic table ID 111670
+ 
+   NUMZM         ADRES    SUIV    PREC    CODE          LONG           UID     PROP4   ...
+ 
+       1             5       6       4   R08 5             0             0
+       2             1       5       5   C80 8             0             0
+       4     268435457       1       6   R08 5             0             0
+       5       1677722       2       2   C80 8             0             0
+       6             5       4       1   I04 2        600037             0
+Numerical memory: Total length                   = 268435456
+(8 byte words)    Present length                 =    600041
+                  Useful length                  =    600041
+                  Number of numerical arrays     =         3
+Character memory: Total length                   =   1677721
+(80 byte words)   Present length                 =         0
+                  Useful length                  =         0
+                  Number of character arrays     =         2
+Maximum number of arrays (num+char)              =    100006
+ 
+20:12:42   21483 sec. FLUX2D_25.1.1 kernel finalized

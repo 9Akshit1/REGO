@@ -1,0 +1,106 @@
+[12|1761156872944|20|CONFIG     ][ApplicationConfiguration|LookandFeelEnum.setCurrentLookAndFeel] : Applying look&feel: (PLASTIC_3D, com.jgoodies.plaf.plastic.Plastic3DLookAndFeel)
+[13|1761156873025|1|CONFIG     ][Application|CoreApplication.internalLaunchApplication] : Application modes:   Debug: false   Advanced: false   Beta: false   Server: false   Batch: false   New project: false Dynamic Memory: false
+[14|1761156873025|1|CONFIG     ][Application|MainFlux.initEnvironment] : User name: eruku
+[15|1761156873025|1|CONFIG     ][Application|CoreApplication.validateDirectory] : Install directory: C:\Program Files\Altair\2025.1\flux\Flux\Resources
+[16|1761156873025|1|CONFIG     ][Application|CoreApplication.validateDirectory] : User home: C:\Users\eruku
+[17|1761156873025|1|CONFIG     ][Application|CoreApplication.validateDirectory] : Running directory: C:\Users\eruku\Akshith\REGO\Altair
+[18|1761156873036|1|CONFIG     ][Application|CoreApplication.validateDirectory] : Temporary directory: C:\Users\eruku\AppData\Local\Temp
+[19|1761156873036|1|CONFIG     ][Application|MainFlux.initEnvironment] : Environment variable CAO_DEFLAN: 2
+[20|1761156873036|1|CONFIG     ][Application|MainFlux.initEnvironment] : Extension directory:   Defined: C:\Program Files\Altair\2025.1\flux\Flux\extensions   Final: C:\Users\eruku
+[21|1761156873036|1|CONFIG     ][Application|MainFlux.initEnvironment] : Certified overlay directory:   Defined: C:\Program Files\Altair\2025.1\flux\Flux\Overlays   Final: C:\Program Files\Altair\2025.1\flux\Flux\Overlays
+[22|1761156873036|1|CONFIG     ][Application|MainFlux.initEnvironment] : User overlay directory:   Defined: C:\Program Files\Altair\2025.1\flux\Extensions\Overlays   Final: C:\Program Files\Altair\2025.1\flux\Extensions\Overlays
+[23|1761156873036|1|CONFIG     ][Application|MainFlux.initEnvironment] : Macro directory:   Defined: C:\Program Files\Altair\2025.1\flux\Extensions\Macros   Final: C:\Program Files\Altair\2025.1\flux\Extensions\Macros
+[24|1761156873219|1|WARNING    ][Selection|DocumentSelectionManager.attachSelectionClient] : Already attached, client: cad.core.frontal.graphic.view.GraphicViewsManager$EventHandler@68878f6d
+Loading data model 'Flux_model.stp'
+Recording commands in 'C:/Users/eruku/Akshith/REGO/Altair/Flux2D_log.py'
+ 
+/----------------------------------------------------------------------------------------------------------------------------\
+| FLUX2D_25.1.1 : 2D Finite Element Electromagnetism                                                                         |
+| 2048 MiB N. + 127 MiB C. + 1024 MiB J.                                                                                     |
+| Build 2508161022 Task/2025.1.1  Change 308 (8a7884) Setup Change 312 (59ab10) Win64 4/12 cores AKSHERU-597_X9J:11380 eruku |
+\----------------------------------------------------------------------------------------------------------------------------/
+ 
+14:14:38       0 sec. FLUX2D_25.1.1 kernel initialized
+[67081|1761156879246|1|INFO       ][ApplicationConfiguration|ApplicationConfiguration.getApplicationConfiguration] : Application: (Flux2D, 2025.1)
+[67082|1761156879275|1|CONFIG     ][ApplicationConfiguration|ApplicationConfiguration.updateGroupPreferences] : Application configuration updated:   Application: (Flux2D, 2025.1)   Groups: 7
+[67084|1761156879370|20|WARNING    ][IconLoader|DefaultFrontalIconLoader.loadImage] : Icon file does not exist: C:\Program Files\Altair\2025.1\flux\Flux\Resources/Images/FluxSupervisor/Background_Flux2D_2025.1.1_en.png
+[67085|1761156879673|20|WARNING    ][IconLoader|DefaultFrontalIconLoader.loadImage] : Icon file does not exist: C:\Program Files\Altair\2025.1\flux\Flux\Resources/Images/FluxSupervisor/Background_Flux2D_2025.1.1_en.png
+[67086|1761156879702|20|WARNING    ][Selection|DocumentSelectionManager.attachSelectionClient] : Already attached, client: cad.core.frontal.components.box.frontaldialog.FrontalDialogBoxManager$EventHandler@214843bb
+
+Flux2D (application 2025.1.1) running
+
+[67095|1761156879809|20|WARNING    ][Selection|DocumentSelectionManager.attachSelectionClient] : Already attached, client: cad.core.frontal.components.tree.TreeManager$EventHandler@5370055e
+[67115|1761156881473|1|WARNING    ][Document|Document.updateInstances] : No project loaded
+[67121|1761156881556|1|WARNING    ][Document|Document.updateInstances] : No project loaded
+[67124|1761156881642|24|WARNING    ][UseCase|UseCaseManager.changeUseCase] : No use case transaction found
+Loading project 'C:/Users/eruku/Akshith/REGO/Altair/Problem1.FLU'
+14:14:41       3 sec. Start reading ...
+14:14:42       3 sec. ... end reading
+Updating the data structure: merge standard database
+Value of parameter CW : 20
+Value of parameter DD : 100
+Value of parameter G : 3
+Value of parameter I : 1
+Value of parameter N : 300
+... end loading project
+   Scenario[CHANGE_AIRGAP] modified
+[67955|1761168795188|24|WARNING    ][JavaViewFactory|FGJavaViewFactory.createDialogBox] : Unable to get associated entity for method dialog box: --- NDialogBoxDescriptor Solve NDialogSolveScenario{name=, type=SOLVE_SCENARIO, Entity=Scenario} --- NDialogGroup SCENARIO_RESOUDRE_BOX.Scenario_resoudre { --- NDialogGroup SCENARIO_RESOUDRE_BOX.Scenario_resoudre.COMMON { } --- End NDialogGroup --- NDialogGroup SCENARIO_RESOUDRE_BOX.Scenario_resoudre.ARGUMENTS { NDialogProjectForSolve{name=scenario_resoudre.nom_projet, type=PROJECT_FOR_SOLVE, Empty} } --- End NDialogGroup } --- End NDialogGroup --- End NDialogBoxDescriptor 
+[67991|1761168795327|20|WARNING    ][SolveScenario|JavaDialogSolveScenarioV$EventHandler.focusGained] : Event ignored: java.awt.event.FocusEvent[FOCUS_GAINED,permanent,opposite=javax.swing.JTree[,0,0,376x511,alignmentX=0.0,alignmentY=0.0,border=,flags=16777576,maximumSize=,minimumSize=,preferredSize=,editable=true,invokesStopCellEditing=false,largeModel=false,rootVisible=true,rowHeight=0,scrollsOnExpand=true,showsRootHandles=true,toggleClickCount=1,visibleRowCount=20],cause=ACTIVATION] on javax.swing.JRadioButton[,2,46,279x18,alignmentX=0.0,alignmentY=0.5,border=javax.swing.plaf.basic.BasicBorders$MarginBorder@ebb0004,flags=360,maximumSize=,minimumSize=,preferredSize=,defaultIcon=,disabledIcon=,disabledSelectedIcon=,margin=javax.swing.plaf.InsetsUIResource[top=2,left=0,bottom=2,right=1],paintBorder=false,paintFocus=true,pressedIcon=,rolloverEnabled=false,rolloverIcon=,rolloverSelectedIcon=,selectedIcon=,text=Solve solving scenario]
+17:33:23   11924 sec. Start reading ...
+17:33:23   11924 sec. ... end reading
+The scenario is already treated: it has already results.
+Before activating the [Solve] command, you must first
+   delete all the stored results using the
+   [Delete all results] command
+or to continue to compute [Continue to solve]
+or to iterate on the current solution (linear and/or non
+   linear), [Iterate on one step]
+[68004|1761168803619|24|INFO       ][ErrorManager|ErrorManager.createFortranException] : Type: -1   Message: The scenario is already treated: it has already results.Before activating the [Solve] command, you must first   delete all the stored results using the   [Delete all results] commandor to continue to compute [Continue to solve]or to iterate on the current solution (linear and/or non   linear), [Iterate on one step]
+[68005|1761168803619|24|INFO       ][Fortran.Error|ErrorManager.createFortranException] : Type: -1   Message: The scenario is already treated: it has already results.Before activating the [Solve] command, you must first   delete all the stored results using the   [Delete all results] commandor to continue to compute [Continue to solve]or to iterate on the current solution (linear and/or non   linear), [Iterate on one step]
+Value of parameter CW : 20
+Value of parameter DD : 100
+Value of parameter G : 3
+Value of parameter I : 1
+Value of parameter N : 300
+[68011|1761168803953|24|INFO       ][ErrorManager|ErrorManager.setPriorityLevel] : Exception: stdcom.error.UserFortranException: The scenario is already treated: it has already results.
+Before activating the [Solve] command, you must first
+   delete all the stored results using the
+   [Delete all results] command
+or to continue to compute [Continue to solve]
+or to iterate on the current solution (linear and/or non
+   linear), [Iterate on one step]
+   Priority: 1
+[68408|1761168804085|24|INFO       ][ErrorManager|ErrorManager.createFortranException] : Type: 500   Message:  
+[68409|1761168804085|24|INFO       ][Fortran.Error|ErrorManager.createFortranException] : Type: 500   Message:  
+[68430|1761168804216|24|WARNING    ][ActionManager|UIActionManager.postAction] : Error during action execution: Action: Scenario_resoudre Exception: (SoftwareFortranException, Failed execution )
+Closing project
+Close of C:/Users/eruku/Akshith/REGO/Altair/Problem1
+[68465|1761178362069|24|WARNING    ][Document|Document.updateInstances] : No project loaded
+[68500|1761178362101|24|WARNING    ][Document|Document.updateInstances] : No project loaded
+... end closing project
+[68504|1761178362117|24|INFO       ][ErrorManager|ErrorManager.createFortranException] : Type: 500   Message: PRGCLE_2 => Failed
+[68505|1761178362117|24|INFO       ][Fortran.Error|ErrorManager.createFortranException] : Type: 500   Message: PRGCLE_2 => Failed
+Maximum use of 302 MiB. in numerical memory
+For the dynamic table ID 16566
+Maximum use of 7 MiB. in character memory
+For the dynamic table ID 111670
+ 
+   NUMZM         ADRES    SUIV    PREC    CODE          LONG           UID     PROP4   ...
+ 
+       1             5       6       4   R08 5             0             0
+       2             1       5       5   C80 8             0             0
+       4     268435457       1       6   R08 5             0             0
+       5       1677722       2       2   C80 8             0             0
+       6             5       4       1   I04 2        600037             0
+Numerical memory: Total length                   = 268435456
+(8 byte words)    Present length                 =    600041
+                  Useful length                  =    600041
+                  Number of numerical arrays     =         3
+Character memory: Total length                   =   1677721
+(80 byte words)   Present length                 =         0
+                  Useful length                  =         0
+                  Number of character arrays     =         2
+Maximum number of arrays (num+char)              =    100006
+ 
+20:12:42   21483 sec. FLUX2D_25.1.1 kernel finalized
+[68556|1761178362756|24|INFO       ][ErrorManager|ErrorManager.setPriorityLevel] : Exception: stdcom.error.SoftwareFortranException: Failed execution   Priority: 1
