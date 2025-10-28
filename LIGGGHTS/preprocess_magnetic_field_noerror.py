@@ -175,11 +175,85 @@ def preprocess_magnetic_field(field_file='B_output.txt', force_multiplier=0.1,
     gradBx = Bx_grid * dBx_dx_grid + By_grid * dBx_dy_grid
     gradBy = Bx_grid * dBy_dx_grid + By_grid * dBy_dy_grid
     grad_mag = np.sqrt(gradBx**2 + gradBy**2)
-    
+
     print(f"✓ Max |(B·∇)B|: {grad_mag.max():.2e} T²/m")
+
+    # ============================================================================
+    # CROP FEM DOMAIN TO MAGNETIC COIL REGION
+    # ============================================================================
+    print(f"\n{'='*80}")
+    print("CROPPING FEM DOMAIN TO MAGNETIC COIL REGION")
+    print(f"{'='*80}")
+
+    # Identify coil region from high-gradient areas
+    # Use threshold: coil region has |(B·∇)B| > 5% of maximum
+    crop_threshold = 0.05
+    grad_threshold = crop_threshold * grad_mag.max()
+    coil_mask = grad_mag > grad_threshold
+
+    # Find bounding box of coil
+    coil_x_indices = np.any(coil_mask, axis=0)
+    coil_y_indices = np.any(coil_mask, axis=1)
+
+    # Add small margin (5% of coil size) to include field near coil edges
+    x_coil_indices_list = np.where(coil_x_indices)[0]
+    y_coil_indices_list = np.where(coil_y_indices)[0]
+
+    if len(x_coil_indices_list) == 0 or len(y_coil_indices_list) == 0:
+        print(f"  ⚠ WARNING: Could not detect coil region automatically!")
+        print(f"  Using full FEM domain instead.")
+        x_coil_min, x_coil_max = x_unique[0], x_unique[-1]
+        y_coil_min, y_coil_max = y_unique[0], y_unique[-1]
+    else:
+        x_margin = max(1, int(0.05 * len(x_coil_indices_list)))
+        y_margin = max(1, int(0.05 * len(y_coil_indices_list)))
+
+        x_start = max(0, x_coil_indices_list[0] - x_margin)
+        x_end = min(len(x_unique) - 1, x_coil_indices_list[-1] + x_margin)
+        y_start = max(0, y_coil_indices_list[0] - y_margin)
+        y_end = min(len(y_unique) - 1, y_coil_indices_list[-1] + y_margin)
+
+        x_coil_min = x_unique[x_start]
+        x_coil_max = x_unique[x_end]
+        y_coil_min = y_unique[y_start]
+        y_coil_max = y_unique[y_end]
+
+        print(f"  Original FEM domain: X=[{fem_x.min():.4f}, {fem_x.max():.4f}], Y=[{fem_y.min():.4f}, {fem_y.max():.4f}] m")
+        print(f"  Detected coil region: X=[{x_coil_min:.4f}, {x_coil_max:.4f}], Y=[{y_coil_min:.4f}, {y_coil_max:.4f}] m")
+        print(f"  Threshold: {crop_threshold*100:.0f}% of max gradient = {grad_threshold:.2e} T²/m")
+
+        # Crop all arrays to coil region
+        x_coil_indices = (x_unique >= x_coil_min) & (x_unique <= x_coil_max)
+        y_coil_indices = (y_unique >= y_coil_min) & (y_unique <= y_coil_max)
+
+        x_unique = x_unique[x_coil_indices]
+        y_unique = y_unique[y_coil_indices]
+
+        # Crop 2D grids
+        Bx_grid = Bx_grid[np.ix_(y_coil_indices, x_coil_indices)]
+        By_grid = By_grid[np.ix_(y_coil_indices, x_coil_indices)]
+        B_grid = B_grid[np.ix_(y_coil_indices, x_coil_indices)]
+        gradBx = gradBx[np.ix_(y_coil_indices, x_coil_indices)]
+        gradBy = gradBy[np.ix_(y_coil_indices, x_coil_indices)]
+        grad_mag = grad_mag[np.ix_(y_coil_indices, x_coil_indices)]
+
+        # Crop the FEM gradient arrays too (CRITICAL for shape matching)
+        dBx_dx_grid = dBx_dx_grid[np.ix_(y_coil_indices, x_coil_indices)]
+        dBx_dy_grid = dBx_dy_grid[np.ix_(y_coil_indices, x_coil_indices)]
+        dBy_dx_grid = dBy_dx_grid[np.ix_(y_coil_indices, x_coil_indices)]
+        dBy_dy_grid = dBy_dy_grid[np.ix_(y_coil_indices, x_coil_indices)]
+
+        # Verify all shapes match
+        assert Bx_grid.shape == dBx_dx_grid.shape == dBy_dx_grid.shape == dBx_dy_grid.shape == dBy_dy_grid.shape, \
+            "Grid shapes disagree — check cropping logic!"
+
+        print(f"  Cropped grid: {len(x_unique)} × {len(y_unique)} points")
+        print(f"  Coil width: {(x_coil_max-x_coil_min)*100:.1f} × {(y_coil_max-y_coil_min)*100:.1f} cm")
+        print(f"  Shapes after cropping: Bx={Bx_grid.shape}, gradients={dBx_dx_grid.shape}")
+        print(f"{'='*80}\n")
     
     # Create LIGGGHTS integration file
-    create_liggghts_integration(x_unique, y_unique, Bx_grid, By_grid, 
+    create_liggghts_integration(x_unique, y_unique, Bx_grid, By_grid, B_grid,
                                 gradBx, gradBy, force_multiplier, config)
     
     # Create visualizations
@@ -196,7 +270,7 @@ def preprocess_magnetic_field(field_file='B_output.txt', force_multiplier=0.1,
     
     return True
 
-def create_liggghts_integration(x_fem, y_fem, Bx, By, gradBx, gradBy, 
+def create_liggghts_integration(x_fem, y_fem, Bx, By, B_grid, gradBx, gradBy, 
                                 force_mult, config):
     """
     Create LIGGGHTS-compatible magnetic field application
@@ -209,8 +283,8 @@ def create_liggghts_integration(x_fem, y_fem, Bx, By, gradBx, gradBy,
     
     particles = config['particles']
     domain = config['domain']
-    
-    # Calculate FEM coil center
+
+    # Calculate actual coil center from extracted region
     x_coil_min, x_coil_max = x_fem.min(), x_fem.max()
     y_coil_min, y_coil_max = y_fem.min(), y_fem.max()
     x_coil_center = (x_coil_min + x_coil_max) / 2.0
@@ -223,19 +297,15 @@ def create_liggghts_integration(x_fem, y_fem, Bx, By, gradBx, gradBy,
     # Offset to center coil in DEM domain
     offset_x = x_coil_center - x_dem_center
     offset_y = y_coil_center - y_dem_center
+
+    # Use maximum resolution for quasi-continuous field (all FEM points in coil)
+    # LIGGGHTS can handle 500-1000 regions with fix addforce
+    target_regions = min(800, len(x_fem) * len(y_fem))
     
-    print(f"\n{'='*80}")
-    print("FEM → DEM DOMAIN MAPPING")
-    print(f"{'='*80}")
-    print(f"  FEM coil center: ({x_coil_center:.4f}, {y_coil_center:.4f}) m")
-    print(f"  DEM domain center: ({x_dem_center:.4f}, {y_dem_center:.4f}) m")
-    print(f"  Offset: ({offset_x:.4f}, {offset_y:.4f}) m")
-    
-    # Create region grid - balance between resolution and performance
-    # LIGGGHTS can handle ~100-200 regions efficiently
-    target_regions = 100
-    nx_grid = min(len(x_fem), int(np.sqrt(target_regions * len(x_fem) / len(y_fem))))
-    ny_grid = min(len(y_fem), int(np.sqrt(target_regions * len(y_fem) / len(x_fem))))
+    # Calculate optimal grid density
+    aspect_ratio = len(x_fem) / len(y_fem)
+    nx_grid = min(len(x_fem), int(np.sqrt(target_regions * aspect_ratio)))
+    ny_grid = min(len(y_fem), int(target_regions / nx_grid))
     
     # Coarsen grid if needed
     x_indices = np.linspace(0, len(x_fem)-1, nx_grid, dtype=int)
@@ -244,7 +314,7 @@ def create_liggghts_integration(x_fem, y_fem, Bx, By, gradBx, gradBy,
     x_coarse = x_fem[x_indices]
     y_coarse = y_fem[y_indices]
     
-    print(f"\n✓ Creating {nx_grid}×{ny_grid} = {nx_grid*ny_grid} regions")
+    print(f"\n✓ Creating {nx_grid}x{ny_grid} = {nx_grid*ny_grid} regions")
     print(f"  Region size: ~{(x_coarse[1]-x_coarse[0])*1000:.1f} × {(y_coarse[1]-y_coarse[0])*1000:.1f} mm")
     
     # Generate LIGGGHTS script
@@ -277,9 +347,15 @@ def create_liggghts_integration(x_fem, y_fem, Bx, By, gradBx, gradBy,
                 y_lo_dem = y_lo_fem - offset_y
                 y_hi_dem = y_hi_fem - offset_y
                 
-                # Get gradient indices in original grid
+                # Get gradient indices in coil grid
                 i_orig = np.searchsorted(x_fem, x_lo_fem)
                 j_orig = np.searchsorted(y_fem, y_lo_fem)
+                
+                # Bounds check
+                if i_orig >= len(x_fem):
+                    i_orig = len(x_fem) - 1
+                if j_orig >= len(y_fem):
+                    j_orig = len(y_fem) - 1
                 
                 # Average gradient in this region
                 grad_bx = gradBx[j_orig, i_orig]
@@ -293,11 +369,13 @@ def create_liggghts_integration(x_fem, y_fem, Bx, By, gradBx, gradBy,
                 
                 region_count += 1
                 
-                # Define region
+                # Define region - use actual particle Z range
+                z_min = domain['z_min']
+                z_max = domain['z_max']
                 f.write(f"region mag_{region_count} block ")
                 f.write(f"{x_lo_dem:.8f} {x_hi_dem:.8f} ")
                 f.write(f"{y_lo_dem:.8f} {y_hi_dem:.8f} ")
-                f.write(f"EDGE EDGE units box\n")
+                f.write(f"{z_min:.8f} {z_max:.8f} units box\n")
                 
                 region_data.append({
                     'id': region_count,
@@ -308,41 +386,106 @@ def create_liggghts_integration(x_fem, y_fem, Bx, By, gradBx, gradBy,
         
         f.write(f"\n# Total regions created: {region_count}\n\n")
         
-        # Apply forces for each particle type
+        # Apply forces using LIGGGHTS-compatible method
         f.write("# === MAGNETIC FORCES BY PARTICLE TYPE ===\n")
-        f.write("# Formula: F = (χ·V/μ₀)·(B·∇)B\n\n")
+        f.write("# Formula: F = (χ·V/μ₀)·(B·∇)B\n")
+        f.write("# Strategy: Spatially-weighted average force per particle type\n")
+        f.write("# Note: LIGGGHTS limitations require simplified approach\n\n")
         
+        # Calculate average force per particle type across all regions
         for ptype, props in particles.items():
             chi = props['chi']
             r = props['r']
             V = (4/3) * np.pi * r**3
             coeff = chi * V / MU0
             
-            f.write(f"# Type {ptype}: {props['name']}\n")
+            f.write(f"\n# Type {ptype}: {props['name']}\n")
             f.write(f"# r={r*1e6:.1f} μm, χ={chi:.2e}, V={V:.2e} m³\n")
             f.write(f"# Coefficient: {coeff:.6e} m³/H\n\n")
             
-            # Apply force for each region
+            # Calculate spatially-weighted average force
+            total_fx_expected = 0.0
+            total_fy_expected = 0.0
+            total_weight = 0.0
             force_count = 0
+            
             for r_data in region_data:
-                rid = r_data['id']
+                # Weight by gradient magnitude (stronger field = more influence)
+                weight = r_data['grad_mag']
                 
-                # Calculate force (simple numeric value)
                 fx = coeff * r_data['gradBx'] * force_mult
                 fy = coeff * r_data['gradBy'] * force_mult
                 
-                # Skip negligible forces
-                if abs(fx) < 1e-20 and abs(fy) < 1e-20:
-                    continue
-                
+                total_fx_expected += fx * weight
+                total_fy_expected += fy * weight
+                total_weight += weight
                 force_count += 1
-                
-                # CRITICAL: LIGGGHTS fix addforce syntax
-                # fix ID group addforce fx fy fz region REGION-ID
-                f.write(f"fix magf_t{ptype}_r{rid} type{ptype}_particles addforce ")
-                f.write(f"{fx:.12e} {fy:.12e} 0.0 region mag_{rid}\n")
             
-            f.write(f"\n# Type {ptype}: {force_count} force fixes created\n\n")
+            # Average force (weighted by field strength)
+            if total_weight > 0:
+                avg_fx = total_fx_expected / total_weight
+                avg_fy = total_fy_expected / total_weight
+            else:
+                avg_fx = 0.0
+                avg_fy = 0.0
+            
+            # Apply single uniform force to this particle type
+            f.write(f"# Spatially-averaged force for Type {ptype}:\n")
+            f.write(f"# Fx = {avg_fx:.6e} N, Fy = {avg_fy:.6e} N\n")
+            
+            if abs(avg_fx) > 1e-25 or abs(avg_fy) > 1e-25:
+                f.write(f"fix magf_t{ptype} type{ptype}_particles addforce {avg_fx:.12e} {avg_fy:.12e} 0.0\n\n")
+            else:
+                f.write(f"# Force negligible, not applied\n\n")
+            
+            # Calculate expected force statistics
+            m_particle = props['density'] * V
+            f_gravity = m_particle * config['gravity']
+            force_mag = np.sqrt(avg_fx**2 + avg_fy**2)
+            force_ratio = force_mag / f_gravity if f_gravity > 0 else 0
+            
+            f.write(f"# Single particle gravity: {f_gravity:.6e} N\n")
+            f.write(f"# Force magnitude: {force_mag:.6e} N\n")
+            f.write(f"# Force ratio (F_mag/F_grav): {force_ratio:.3f}x\n\n")
+            
+            # Calculate expected force statistics
+            force_mag_expected = np.sqrt(total_fx_expected**2 + total_fy_expected**2)
+            
+            # Compare to gravity for this particle type
+            m_particle = props['density'] * V
+            f_gravity = m_particle * config['gravity']
+            force_ratio = force_mag_expected / f_gravity if f_gravity > 0 else 0
+            
+            f.write(f"\n# Type {ptype}: {force_count} force fixes created\n")
+            f.write(f"# Expected total force: Fx={total_fx_expected:.6e} N, Fy={total_fy_expected:.6e} N\n")
+            f.write(f"# Expected |F_mag|: {force_mag_expected:.6e} N\n")
+            f.write(f"# Single particle gravity: {f_gravity:.6e} N\n")
+            f.write(f"# Force ratio (F_mag/F_grav per region): {force_ratio/force_count if force_count > 0 else 0:.3f}x\n\n")
+
+        # Print comprehensive summary
+        print(f"\n{'='*80}")
+        print("FORCE APPLICATION SUMMARY")
+        print(f"{'='*80}")
+        for ptype, props in particles.items():
+            chi = props['chi']
+            r = props['r']
+            V = (4/3) * np.pi * r**3
+            m = props['density'] * V
+            f_grav = m * config['gravity']
+            
+            print(f"\nType {ptype} ({props['name']}):")
+            print(f"  Radius: {r*1e6:.1f} μm")
+            print(f"  Mass: {m:.6e} kg")
+            print(f"  Gravity force: {f_grav:.6e} N")
+            print(f"  Magnetic susceptibility: {chi:.2e}")
+            print(f"  Force coefficient: {chi * V / MU0:.6e}")
+            
+            # Estimate typical magnetic force
+            typical_grad = np.median(np.sqrt(gradBx**2 + gradBy**2))
+            f_mag_typical = abs(chi * V / MU0) * typical_grad * force_mult
+            print(f"  Typical magnetic force: {f_mag_typical:.6e} N")
+            print(f"  F_mag/F_grav ratio: {f_mag_typical/f_grav:.3f}x")
+        print(f"{'='*80}\n")
         
         # Add damping
         f.write("# === VELOCITY DAMPING ===\n")

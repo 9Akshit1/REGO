@@ -243,6 +243,31 @@ print "Goal: Position particles into precise 3D shape for sintering"
 print "Expected behavior: Diamagnetic particles repelled to low-field regions"
 print "=========================================================================="
 
+# CRITICAL: Redefine particle groups BEFORE applying magnetic forces
+# Groups defined at simulation start don't include inserted particles
+print "Redefining particle type groups to include all inserted particles..."
+group type1_particles delete
+group type2_particles delete
+group type3_particles delete
+group type4_particles delete
+
+group type1_particles type 1
+group type2_particles type 2
+group type3_particles type 3
+group type4_particles type 4
+
+# Verify groups have particles
+variable n_t1 equal count(type1_particles)
+variable n_t2 equal count(type2_particles)
+variable n_t3 equal count(type3_particles)
+variable n_t4 equal count(type4_particles)
+
+print "Particle counts by type:"
+print "  Type 1: ${n_t1} particles"
+print "  Type 2: ${n_t2} particles"
+print "  Type 3: ${n_t3} particles"
+print "  Type 4: ${n_t4} particles"
+
 # Define force tracking computes BEFORE including magnetic field
 compute fx_all all reduce sum fx
 compute fy_all all reduce sum fy

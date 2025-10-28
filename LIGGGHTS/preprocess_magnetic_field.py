@@ -1,13 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-LIGGGHTS-COMPATIBLE Magnetic Field Preprocessor
-KEY FIXES:
-1. No atom-style variables (not supported in LIGGGHTS)
-2. Use fix addforce with simple numeric values only
-3. Pre-calculate forces for discrete regions
-4. Proper FEM coil → DEM domain mapping
-5. Continuous-like field via dense region grid
+LIGGGHTS-COMPATIBLE Magnetic Field Preprocessor with COMPREHENSIVE DEBUGGING
 """
 
 import numpy as np
@@ -175,11 +169,83 @@ def preprocess_magnetic_field(field_file='B_output.txt', force_multiplier=0.1,
     gradBx = Bx_grid * dBx_dx_grid + By_grid * dBx_dy_grid
     gradBy = Bx_grid * dBy_dx_grid + By_grid * dBy_dy_grid
     grad_mag = np.sqrt(gradBx**2 + gradBy**2)
-    
+
     print(f"✓ Max |(B·∇)B|: {grad_mag.max():.2e} T²/m")
+
+    # ============================================================================
+    # CROP FEM DOMAIN TO MAGNETIC COIL REGION
+    # ============================================================================
+    print(f"\n{'='*80}")
+    print("CROPPING FEM DOMAIN TO MAGNETIC COIL REGION")
+    print(f"{'='*80}")
+
+    # Identify coil region from high-gradient areas
+    crop_threshold = 0.05
+    grad_threshold = crop_threshold * grad_mag.max()
+    coil_mask = grad_mag > grad_threshold
+
+    # Find bounding box of coil
+    coil_x_indices = np.any(coil_mask, axis=0)
+    coil_y_indices = np.any(coil_mask, axis=1)
+
+    # Add small margin
+    x_coil_indices_list = np.where(coil_x_indices)[0]
+    y_coil_indices_list = np.where(coil_y_indices)[0]
+
+    if len(x_coil_indices_list) == 0 or len(y_coil_indices_list) == 0:
+        print(f"  ⚠ WARNING: Could not detect coil region automatically!")
+        print(f"  Using full FEM domain instead.")
+        x_coil_min, x_coil_max = x_unique[0], x_unique[-1]
+        y_coil_min, y_coil_max = y_unique[0], y_unique[-1]
+    else:
+        x_margin = max(1, int(0.05 * len(x_coil_indices_list)))
+        y_margin = max(1, int(0.05 * len(y_coil_indices_list)))
+
+        x_start = max(0, x_coil_indices_list[0] - x_margin)
+        x_end = min(len(x_unique) - 1, x_coil_indices_list[-1] + x_margin)
+        y_start = max(0, y_coil_indices_list[0] - y_margin)
+        y_end = min(len(y_unique) - 1, y_coil_indices_list[-1] + y_margin)
+
+        x_coil_min = x_unique[x_start]
+        x_coil_max = x_unique[x_end]
+        y_coil_min = y_unique[y_start]
+        y_coil_max = y_unique[y_end]
+
+        print(f"  Original FEM domain: X=[{fem_x.min():.4f}, {fem_x.max():.4f}], Y=[{fem_y.min():.4f}, {fem_y.max():.4f}] m")
+        print(f"  Detected coil region: X=[{x_coil_min:.4f}, {x_coil_max:.4f}], Y=[{y_coil_min:.4f}, {y_coil_max:.4f}] m")
+        print(f"  Threshold: {crop_threshold*100:.0f}% of max gradient = {grad_threshold:.2e} T²/m")
+
+        # Crop all arrays to coil region
+        x_coil_indices = (x_unique >= x_coil_min) & (x_unique <= x_coil_max)
+        y_coil_indices = (y_unique >= y_coil_min) & (y_unique <= y_coil_max)
+
+        x_unique = x_unique[x_coil_indices]
+        y_unique = y_unique[y_coil_indices]
+
+        # Crop 2D grids
+        Bx_grid = Bx_grid[np.ix_(y_coil_indices, x_coil_indices)]
+        By_grid = By_grid[np.ix_(y_coil_indices, x_coil_indices)]
+        B_grid = B_grid[np.ix_(y_coil_indices, x_coil_indices)]
+        gradBx = gradBx[np.ix_(y_coil_indices, x_coil_indices)]
+        gradBy = gradBy[np.ix_(y_coil_indices, x_coil_indices)]
+        grad_mag = grad_mag[np.ix_(y_coil_indices, x_coil_indices)]
+
+        # Crop the FEM gradient arrays too
+        dBx_dx_grid = dBx_dx_grid[np.ix_(y_coil_indices, x_coil_indices)]
+        dBx_dy_grid = dBx_dy_grid[np.ix_(y_coil_indices, x_coil_indices)]
+        dBy_dx_grid = dBy_dx_grid[np.ix_(y_coil_indices, x_coil_indices)]
+        dBy_dy_grid = dBy_dy_grid[np.ix_(y_coil_indices, x_coil_indices)]
+
+        assert Bx_grid.shape == dBx_dx_grid.shape == dBy_dx_grid.shape == dBx_dy_grid.shape == dBy_dy_grid.shape, \
+            "Grid shapes disagree — check cropping logic!"
+
+        print(f"  Cropped grid: {len(x_unique)} × {len(y_unique)} points")
+        print(f"  Coil width: {(x_coil_max-x_coil_min)*100:.1f} × {(y_coil_max-y_coil_min)*100:.1f} cm")
+        print(f"  Shapes after cropping: Bx={Bx_grid.shape}, gradients={dBx_dx_grid.shape}")
+        print(f"{'='*80}\n")
     
     # Create LIGGGHTS integration file
-    create_liggghts_integration(x_unique, y_unique, Bx_grid, By_grid, 
+    create_liggghts_integration(x_unique, y_unique, Bx_grid, By_grid, B_grid,
                                 gradBx, gradBy, force_multiplier, config)
     
     # Create visualizations
@@ -196,139 +262,175 @@ def preprocess_magnetic_field(field_file='B_output.txt', force_multiplier=0.1,
     
     return True
 
-def create_liggghts_integration(x_fem, y_fem, Bx, By, gradBx, gradBy, 
+def create_liggghts_integration(x_fem, y_fem, Bx, By, B_grid, gradBx, gradBy, 
                                 force_mult, config):
     """
-    Create LIGGGHTS-compatible magnetic field application
-    
-    STRATEGY: Use dense grid of regions with fix addforce
-    - Each region gets constant force (average in that region)
-    - No variables (LIGGGHTS doesn't support atom-style variables)
-    - Simple numeric values only
+    Create LIGGGHTS-compatible magnetic field application with COMPREHENSIVE DEBUGGING
     """
     
     particles = config['particles']
     domain = config['domain']
-    
-    # This will be calculated AFTER coil extraction in the function
-    # Placeholder for now
-    x_coil_center = 0.0
-    y_coil_center = 0.0
-    
-    # Calculate DEM domain center
-    x_dem_center = (domain['x_min'] + domain['x_max']) / 2.0
-    y_dem_center = (domain['y_min'] + domain['y_max']) / 2.0
-    
-    # Offset to center coil in DEM domain
-    offset_x = x_coil_center - x_dem_center
-    offset_y = y_coil_center - y_dem_center
-    
-    print(f"\n{'='*80}")
-    print("FEM → DEM DOMAIN MAPPING")
-    print(f"{'='*80}")
-    print(f"  FEM coil center: ({x_coil_center:.4f}, {y_coil_center:.4f}) m")
-    print(f"  DEM domain center: ({x_dem_center:.4f}, {y_dem_center:.4f}) m")
-    print(f"  Offset: ({offset_x:.4f}, {offset_y:.4f}) m")
-    
-    # Create DENSE region grid for quasi-continuous field
-    # Extract only non-zero field region to focus on coil
-    # Find actual coil boundary by field strength threshold
-    field_threshold = 0.01 * np.max(np.sqrt(gradBx**2 + gradBy**2))  # 1% of max
-    
-    # Find coil extent
-    mask = np.sqrt(gradBx**2 + gradBy**2) > field_threshold
-    y_indices, x_indices = np.where(mask)
-    
-    if len(x_indices) == 0:
-        print("WARNING: No significant field found! Using full domain.")
-        x_coil_start, x_coil_end = 0, len(x_fem)-1
-        y_coil_start, y_coil_end = 0, len(y_fem)-1
-    else:
-        x_coil_start, x_coil_end = x_indices.min(), x_indices.max()
-        y_coil_start, y_coil_end = y_indices.min(), y_indices.max()
-    
-    # Extract ONLY coil region from FEM data
-    x_fem_coil = x_fem[x_coil_start:x_coil_end+1]
-    y_fem_coil = y_fem[y_coil_start:y_coil_end+1]
-    Bx_coil = Bx[y_coil_start:y_coil_end+1, x_coil_start:x_coil_end+1]
-    By_coil = By[y_coil_start:y_coil_end+1, x_coil_start:x_coil_end+1]
-    gradBx_coil = gradBx[y_coil_start:y_coil_end+1, x_coil_start:x_coil_end+1]
-    gradBy_coil = gradBy[y_coil_start:y_coil_end+1, x_coil_start:x_coil_end+1]
-    
-    print(f"\n✓ Coil region extracted:")
-    print(f"  FEM indices: X[{x_coil_start}:{x_coil_end}], Y[{y_coil_start}:{y_coil_end}]")
-    print(f"  Coil size: {len(x_fem_coil)} × {len(y_fem_coil)} points")
-    print(f"  Coil physical: X=[{x_fem_coil.min():.4f}, {x_fem_coil.max():.4f}] m")
-    print(f"  Coil physical: Y=[{y_fem_coil.min():.4f}, {y_fem_coil.max():.4f}] m")
 
-    # Calculate actual coil center from extracted region
-    x_coil_min, x_coil_max = x_fem_coil.min(), x_fem_coil.max()
-    y_coil_min, y_coil_max = y_fem_coil.min(), y_fem_coil.max()
+    # ============================================================================
+    # CRITICAL: CORRECT COORDINATE MAPPING FEM → DEM
+    # ============================================================================
+    # Strategy: Map FEM coil center directly to DEM origin (0, 0)
+    # 
+    # The issue: DEM domain center is (0, 0) in physical coordinates
+    # FEM coil center is at some arbitrary position from COMSOL
+    # 
+    # Simple mapping: Shift FEM by its own center to place it at DEM origin
+    # ============================================================================
+
+    # FEM coil bounds and center
+    x_coil_min, x_coil_max = x_fem.min(), x_fem.max()
+    y_coil_min, y_coil_max = y_fem.min(), y_fem.max()
     x_coil_center = (x_coil_min + x_coil_max) / 2.0
     y_coil_center = (y_coil_min + y_coil_max) / 2.0
+    coil_width_x = x_coil_max - x_coil_min
+    coil_width_y = y_coil_max - y_coil_min
 
-    # Verify coil will overlap with DEM domain
-    dem_x_min, dem_x_max = domain['x_min'], domain['x_max']
-    dem_y_min, dem_y_max = domain['y_min'], domain['y_max']
-    
-    print(f"  DEM domain: X=[{dem_x_min:.4f}, {dem_x_max:.4f}] m")
-    print(f"  DEM domain: Y=[{dem_y_min:.4f}, {dem_y_max:.4f}] m")
-    
-    # Calculate where coil will be placed in DEM
+    # DEM domain center (0, 0 in this simulation)
+    x_dem_center = (domain['x_min'] + domain['x_max']) / 2.0
+    y_dem_center = (domain['y_min'] + domain['y_max']) / 2.0
+
+    # SIMPLE OFFSET: Just use FEM center directly
+    # This places FEM coil center at DEM (0, 0)
+    offset_x = x_coil_center
+    offset_y = y_coil_center
+
+    print(f"\n{'='*80}")
+    print("COORDINATE MAPPING VERIFICATION")
+    print(f"{'='*80}")
+    print(f"FEM coil:")
+    print(f"  Bounds: X=[{x_coil_min:.6f}, {x_coil_max:.6f}] m")
+    print(f"          Y=[{y_coil_min:.6f}, {y_coil_max:.6f}] m")
+    print(f"  Center: ({x_coil_center:.6f}, {y_coil_center:.6f}) m")
+    print(f"  Width:  {coil_width_x*100:.2f} × {coil_width_y*100:.2f} cm")
+    print(f"")
+    print(f"DEM domain:")
+    print(f"  Bounds: X=[{domain['x_min']:.6f}, {domain['x_max']:.6f}] m")
+    print(f"          Y=[{domain['y_min']:.6f}, {domain['y_max']:.6f}] m")
+    print(f"  Center: ({x_dem_center:.6f}, {y_dem_center:.6f}) m")
+    print(f"")
+    print(f"Coordinate transformation:")
+    print(f"  Offset: ({offset_x:.6f}, {offset_y:.6f}) m")
+    print(f"  Formula: x_DEM = x_FEM - {offset_x:.6f}")
+    print(f"           y_DEM = y_FEM - {offset_y:.6f}")
+    print(f"")
+    print(f"Verification (coil center after mapping):")
+    coil_center_in_dem_x = x_coil_center - offset_x
+    coil_center_in_dem_y = y_coil_center - offset_y
+    print(f"  FEM coil center ({x_coil_center:.6f}, {y_coil_center:.6f})")
+    print(f"  Maps to DEM: ({coil_center_in_dem_x:.6f}, {coil_center_in_dem_y:.6f})")
+    print(f"  DEM center:  ({x_dem_center:.6f}, {y_dem_center:.6f})")
+    print(f"  Match? {abs(coil_center_in_dem_x - x_dem_center) < 1e-6 and abs(coil_center_in_dem_y - y_dem_center) < 1e-6}")
+    print(f"")
+    print(f"Coil coverage in DEM domain:")
     coil_x_min_dem = x_coil_min - offset_x
     coil_x_max_dem = x_coil_max - offset_x
     coil_y_min_dem = y_coil_min - offset_y
     coil_y_max_dem = y_coil_max - offset_y
-    
-    print(f"  Coil in DEM: X=[{coil_x_min_dem:.4f}, {coil_x_max_dem:.4f}] m")
-    print(f"  Coil in DEM: Y=[{coil_y_min_dem:.4f}, {coil_y_max_dem:.4f}] m")
-    
-    # Check overlap
-    x_overlap = min(dem_x_max, coil_x_max_dem) - max(dem_x_min, coil_x_min_dem)
-    y_overlap = min(dem_y_max, coil_y_max_dem) - max(dem_y_min, coil_y_min_dem)
-    
-    if x_overlap <= 0 or y_overlap <= 0:
-        print(f"  ⚠️  WARNING: NO OVERLAP between coil and DEM domain!")
-        print(f"     X overlap: {x_overlap*1000:.1f} mm")
-        print(f"     Y overlap: {y_overlap*1000:.1f} mm")
-    else:
-        overlap_pct = (x_overlap * y_overlap) / ((dem_x_max-dem_x_min) * (dem_y_max-dem_y_min)) * 100
-        print(f"  ✓ Coil overlaps {overlap_pct:.1f}% of DEM domain")
-    
-    # Use maximum resolution for quasi-continuous field (all FEM points in coil)
-    # LIGGGHTS can handle 500-1000 regions with fix addforce
-    target_regions = min(800, len(x_fem_coil) * len(y_fem_coil))
+    print(f"  X: [{coil_x_min_dem:.6f}, {coil_x_max_dem:.6f}] m")
+    print(f"  Y: [{coil_y_min_dem:.6f}, {coil_y_max_dem:.6f}] m")
+    print(f"{'='*80}\n")
+
+    # Use FULL resolution - no coarsening
+    # This ensures we don't miss particles due to grid spacing
+    target_regions = len(x_fem) * len(y_fem)
     
     # Calculate optimal grid density
-    aspect_ratio = len(x_fem_coil) / len(y_fem_coil)
-    nx_grid = min(len(x_fem_coil), int(np.sqrt(target_regions * aspect_ratio)))
-    ny_grid = min(len(y_fem_coil), int(target_regions / nx_grid))
+    aspect_ratio = len(x_fem) / len(y_fem)
+    nx_grid = min(len(x_fem), int(np.sqrt(target_regions * aspect_ratio)))
+    ny_grid = min(len(y_fem), int(target_regions / nx_grid))
     
     # Coarsen grid if needed
-    x_indices = np.linspace(0, len(x_fem_coil)-1, nx_grid, dtype=int)
-    y_indices = np.linspace(0, len(y_fem_coil)-1, ny_grid, dtype=int)
+    x_indices = np.linspace(0, len(x_fem)-1, nx_grid, dtype=int)
+    y_indices = np.linspace(0, len(y_fem)-1, ny_grid, dtype=int)
     
-    x_coarse = x_fem_coil[x_indices]
-    y_coarse = y_fem_coil[y_indices]
+    x_coarse = x_fem[x_indices]
+    y_coarse = y_fem[y_indices]
     
-    print(f"\n✓ Creating {nx_grid}×{ny_grid} = {nx_grid*ny_grid} regions")
+    print(f"\n✓ Creating {nx_grid}x{ny_grid} = {nx_grid*ny_grid} regions")
     print(f"  Region size: ~{(x_coarse[1]-x_coarse[0])*1000:.1f} × {(y_coarse[1]-y_coarse[0])*1000:.1f} mm")
+    print(f"\n📍 CRITICAL DEBUG - Coordinate Transform:")
+    print(f"  FEM coil center: ({x_coil_center:.6f}, {y_coil_center:.6f})")
+    print(f"  DEM target: ({x_dem_center:.6f}, {y_dem_center:.6f})")
+    print(f"  Offset being applied: ({offset_x:.6f}, {offset_y:.6f})")
+    print(f"  ")
+    print(f"  Example: FEM point ({x_coarse[0]:.6f}, {y_coarse[0]:.6f})")
+    print(f"  Maps to DEM: ({x_coarse[0] - offset_x:.6f}, {y_coarse[0] - offset_y:.6f})")
+    print(f"  ")
+    print(f"  FEM coil center ({x_coil_center:.6f}, {y_coil_center:.6f})")
+    print(f"  Maps to DEM: ({x_coil_center - offset_x:.6f}, {y_coil_center - offset_y:.6f})")
+    print(f"  (Should be exactly ({x_dem_center:.6f}, {y_dem_center:.6f}))\n")
     
-    # Generate LIGGGHTS script
+    # Generate LIGGGHTS script with COMPREHENSIVE DEBUGGING
     with open('magnetic_field_apply.lmp', 'w', encoding='utf-8') as f:
         f.write("# " + "="*74 + "\n")
-        f.write("# LIGGGHTS-COMPATIBLE MAGNETIC FIELD APPLICATION\n")
-        f.write("# Strategy: Dense region grid with fix addforce (numeric values only)\n")
+        f.write("# LIGGGHTS MAGNETIC FIELD WITH COMPREHENSIVE DEBUGGING\n")
         f.write(f"# Grid: {nx_grid}×{ny_grid} = {nx_grid*ny_grid} regions\n")
         f.write("# " + "="*74 + "\n\n")
         
+        # =====================================================================
+        # INITIAL SYSTEM STATE
+        # =====================================================================
+        f.write("# " + "="*74 + "\n")
+        f.write("# DEBUG: INITIAL SYSTEM STATE\n")
+        f.write("# " + "="*74 + "\n")
         f.write("print '==============================================================================='\n")
-        f.write("print 'ACTIVATING MAGNETIC FIELD'\n")
-        f.write("print '==============================================================================='\n\n")
+        f.write("print 'DEBUG: PRE-MAGNETIC FIELD SYSTEM STATE'\n")
+        f.write("print '==============================================================================='\n")
+        f.write("variable n_atoms equal atoms\n")
+        f.write("variable dt_val equal dt\n")
+        f.write("variable step_val equal step\n")
+        f.write("variable time_val equal time\n")
+        f.write("print 'Total atoms: ${n_atoms}'\n")
+        f.write(f"print 'Total types: {config['n_types']}'\n")
+        f.write("print 'Timestep: ${dt_val}'\n")
+        f.write("print 'Current step: ${step_val}'\n")
+        f.write("print 'Simulation time: ${time_val} s'\n")
+        f.write("print '-------------------------------------------------------------------------------'\n\n")
         
-        # Define all regions first
-        f.write("# === MAGNETIC FIELD REGIONS ===\n")
-        f.write(f"# Mapping FEM coil to DEM domain with offset ({offset_x:.4f}, {offset_y:.4f}) m\n\n")
+        # Domain check
+        f.write("# Domain boundaries\n")
+        f.write(f"print 'Domain X: {domain["x_min"]:.6f} to {domain["x_max"]:.6f} m'\n")
+        f.write(f"print 'Domain Y: {domain["y_min"]:.6f} to {domain["y_max"]:.6f} m'\n")
+        f.write(f"print 'Domain Z: {domain["z_min"]:.6f} to {domain["z_max"]:.6f} m'\n")
+        f.write("print '-------------------------------------------------------------------------------'\n\n")
+        
+        # Per-type particle counts
+        f.write("# Particle counts by type\n")
+        for ptype in particles.keys():
+            f.write(f"variable n_type{ptype} equal count(type{ptype}_particles)\n")
+            f.write(f"print 'Type {ptype} particles: ${{n_type{ptype}}}'\n")
+        f.write("print '-------------------------------------------------------------------------------'\n\n")
+        
+        # Center of mass tracking
+        f.write("# Center of mass (initial)\n")
+        for ptype in particles.keys():
+            f.write(f"variable com_x_{ptype}_init equal xcm(type{ptype}_particles,x)\n")
+            f.write(f"variable com_y_{ptype}_init equal xcm(type{ptype}_particles,y)\n")
+            f.write(f"variable com_z_{ptype}_init equal xcm(type{ptype}_particles,z)\n")
+            f.write(f"print 'Type {ptype} COM (initial): (${{com_x_{ptype}_init}}, ${{com_y_{ptype}_init}}, ${{com_z_{ptype}_init}}) m'\n")
+        f.write("print '-------------------------------------------------------------------------------'\n\n")
+        
+        # Average velocity - skip for now (LIGGGHTS compute timing issue)
+        f.write("# Average velocities (initial) - skipped due to LIGGGHTS limitations\n")
+        f.write("print 'Velocity statistics available in thermo output'\n")
+        f.write("print '-------------------------------------------------------------------------------'\n\n")
+        
+        # =====================================================================
+        # MAGNETIC FIELD REGIONS
+        # =====================================================================
+        f.write("# " + "="*74 + "\n")
+        f.write("# DEBUG: MAGNETIC FIELD REGIONS\n")
+        f.write("# " + "="*74 + "\n")
+        f.write(f"print 'Defining {nx_grid*ny_grid} magnetic field regions...'\n")
+        f.write(f"print 'FEM coil center: ({x_coil_center:.6f}, {y_coil_center:.6f}) m'\n")
+        f.write(f"print 'DEM domain center: ({x_dem_center:.6f}, {y_dem_center:.6f}) m'\n")
+        f.write(f"print 'Offset applied: ({offset_x:.6f}, {offset_y:.6f}) m'\n")
+        f.write("print '-------------------------------------------------------------------------------'\n\n")
         
         region_count = 0
         region_data = []
@@ -345,18 +447,18 @@ def create_liggghts_integration(x_fem, y_fem, Bx, By, gradBx, gradBy,
                 y_hi_dem = y_hi_fem - offset_y
                 
                 # Get gradient indices in coil grid
-                i_orig = np.searchsorted(x_fem_coil, x_lo_fem)
-                j_orig = np.searchsorted(y_fem_coil, y_lo_fem)
+                i_orig = np.searchsorted(x_fem, x_lo_fem)
+                j_orig = np.searchsorted(y_fem, y_lo_fem)
                 
                 # Bounds check
-                if i_orig >= len(x_fem_coil):
-                    i_orig = len(x_fem_coil) - 1
-                if j_orig >= len(y_fem_coil):
-                    j_orig = len(y_fem_coil) - 1
+                if i_orig >= len(x_fem):
+                    i_orig = len(x_fem) - 1
+                if j_orig >= len(y_fem):
+                    j_orig = len(y_fem) - 1
                 
                 # Average gradient in this region
-                grad_bx = gradBx_coil[j_orig, i_orig]
-                grad_by = gradBy_coil[j_orig, i_orig]
+                grad_bx = gradBx[j_orig, i_orig]
+                grad_by = gradBy[j_orig, i_orig]
                 
                 grad_mag = np.sqrt(grad_bx**2 + grad_by**2)
                 
@@ -366,7 +468,7 @@ def create_liggghts_integration(x_fem, y_fem, Bx, By, gradBx, gradBy,
                 
                 region_count += 1
                 
-                # Define region - use actual particle Z range
+                # Define region
                 z_min = domain['z_min']
                 z_max = domain['z_max']
                 f.write(f"region mag_{region_count} block ")
@@ -378,18 +480,108 @@ def create_liggghts_integration(x_fem, y_fem, Bx, By, gradBx, gradBy,
                     'id': region_count,
                     'gradBx': grad_bx,
                     'gradBy': grad_by,
-                    'grad_mag': grad_mag
+                    'grad_mag': grad_mag,
+                    'x_lo': x_lo_dem,
+                    'x_hi': x_hi_dem,
+                    'y_lo': y_lo_dem,
+                    'y_hi': y_hi_dem
                 })
         
-        f.write(f"\n# Total regions created: {region_count}\n\n")
+        f.write(f"\nprint '{region_count} regions defined successfully'\n")
+        f.write("print '==============================================================================='\n\n")
         
-        # Apply forces using LIGGGHTS-compatible method
-        f.write("# === MAGNETIC FORCES BY PARTICLE TYPE ===\n")
-        f.write("# Formula: F = (χ·V/μ₀)·(B·∇)B\n")
-        f.write("# Strategy: Spatially-weighted average force per particle type\n")
-        f.write("# Note: LIGGGHTS limitations require simplified approach\n\n")
+        # ===== ADD THIS ENTIRE SECTION =====
+        # Print first 5 region bounds for verification
+        f.write("# " + "="*74 + "\n")
+        f.write("# DEBUG: FIRST 5 REGION BOUNDS (in DEM coordinates)\n")
+        f.write("# " + "="*74 + "\n")
+        f.write("print 'First 5 region bounds (DEM coordinates):'\n")
+        f.write("print '-------------------------------------------------------------------------------'\n")
         
-        # Calculate average force per particle type across all regions
+        for i, r_data in enumerate(region_data[:5], 1):
+            rid = r_data['id']
+            f.write(f"print '  Region {rid}:'\n")
+            f.write(f"print '    X: [{r_data['x_lo']:.6f}, {r_data['x_hi']:.6f}] m'\n")
+            f.write(f"print '    Y: [{r_data['y_lo']:.6f}, {r_data['y_hi']:.6f}] m'\n")
+            f.write(f"print '    Center: ({(r_data['x_lo']+r_data['x_hi'])/2:.6f}, {(r_data['y_lo']+r_data['y_hi'])/2:.6f}) m'\n")
+        
+        f.write("print ''\n")
+        f.write(f"print 'Particle locations (from initial state):'\n")
+        f.write("print '  Type 1 COM: will be printed in next section'\n")
+        f.write("print ''\n")
+        f.write("print 'Expected: If particles are at (0, 0), they should be in regions'\n")
+        f.write("print '          with bounds that span across X=0, Y=0'\n")
+        f.write("print '==============================================================================='\n\n")
+        
+        # =====================================================================
+        # REGION VERIFICATION
+        # =====================================================================
+        f.write("# " + "="*74 + "\n")
+        f.write("# DEBUG: REGION VERIFICATION\n")
+        f.write("# " + "="*74 + "\n")
+        f.write("print 'Verifying particle counts in magnetic regions...'\n")
+        f.write("print '-------------------------------------------------------------------------------'\n")
+        
+        # Find regions that overlap with center (where particles actually are)
+        # Center region: -0.01 to 0.01 in X and Y
+        center_regions = []
+        for r_data in region_data:
+            x_center = (r_data['x_lo'] + r_data['x_hi']) / 2.0
+            y_center = (r_data['y_lo'] + r_data['y_hi']) / 2.0
+            # Check if region center is within 2cm of origin
+            if abs(x_center) < 0.02 and abs(y_center) < 0.02:
+                center_regions.append(r_data)
+        
+        f.write(f"print 'Found {len(center_regions)} regions near center (within 2cm of origin)'\n")
+        f.write("print ''\n")
+        
+        # Sample first 10 CENTER regions (not first 10 overall)
+        regions_to_check = center_regions[:10] if len(center_regions) >= 10 else center_regions
+        
+        if len(regions_to_check) == 0:
+            f.write("print 'WARNING: NO regions found near center! Checking first 10 regions instead...'\n")
+            regions_to_check = region_data[:10]
+        
+        for r_data in regions_to_check:
+            rid = r_data['id']
+            for ptype in particles.keys():
+                f.write(f"variable n_in_reg_{rid}_t{ptype} equal count(type{ptype}_particles,mag_{rid})\n")
+                f.write(f"print '  Region {rid}, Type {ptype}: ${{n_in_reg_{rid}_t{ptype}}} particles'\n")
+        
+        f.write("print '  ... (showing regions near center)'\n")
+        f.write("print '==============================================================================='\n\n")
+
+        f.write("# " + "="*74 + "\n")
+        f.write("# DEBUG: CENTER REGION DETAILS\n")
+        f.write("# " + "="*74 + "\n")
+        f.write("print 'Details of first 3 center regions:'\n")
+        f.write("print '-------------------------------------------------------------------------------'\n")
+        
+        for i, r_data in enumerate(center_regions[:3], 1):
+            rid = r_data['id']
+            x_center = (r_data['x_lo'] + r_data['x_hi']) / 2.0
+            y_center = (r_data['y_lo'] + r_data['y_hi']) / 2.0
+            f.write(f"print 'Center Region {i} (ID={rid}):'\n")
+            f.write(f"print '  Bounds: X=[{r_data['x_lo']:.6f}, {r_data['x_hi']:.6f}] m'\n")
+            f.write(f"print '          Y=[{r_data['y_lo']:.6f}, {r_data['y_hi']:.6f}] m'\n")
+            f.write(f"print '  Center: ({x_center:.6f}, {y_center:.6f}) m'\n")
+            f.write(f"print '  Gradient: {r_data['grad_mag']:.3e} T²/m'\n")
+            f.write("print ''\n")
+        
+        f.write("print '==============================================================================='\n\n")
+        
+        # =====================================================================
+        # MAGNETIC FORCES
+        # =====================================================================
+        f.write("# " + "="*74 + "\n")
+        f.write("# DEBUG: APPLYING MAGNETIC FORCES\n")
+        f.write("# " + "="*74 + "\n")
+        f.write("print 'Calculating and applying magnetic forces...'\n")
+        f.write(f"print 'Force multiplier: {force_mult}'\n")
+        f.write(f"print 'μ₀ = {MU0:.10e} H/m'\n")
+        f.write("print '-------------------------------------------------------------------------------'\n\n")
+        
+        # Calculate average force per particle type
         for ptype, props in particles.items():
             chi = props['chi']
             r = props['r']
@@ -397,28 +589,26 @@ def create_liggghts_integration(x_fem, y_fem, Bx, By, gradBx, gradBy,
             coeff = chi * V / MU0
             
             f.write(f"\n# Type {ptype}: {props['name']}\n")
-            f.write(f"# r={r*1e6:.1f} μm, χ={chi:.2e}, V={V:.2e} m³\n")
-            f.write(f"# Coefficient: {coeff:.6e} m³/H\n\n")
+            f.write(f"print 'Type {ptype} - {props["name"]}:'\n")
+            f.write(f"print '  Radius: {r*1e6:.2f} μm'\n")
+            f.write(f"print '  Volume: {V:.6e} m³'\n")
+            f.write(f"print '  Density: {props["density"]:.0f} kg/m³'\n")
+            f.write(f"print '  χ: {chi:.6e}'\n")
+            f.write(f"print '  Force coefficient (χV/μ₀): {coeff:.6e} m³/H'\n")
             
             # Calculate spatially-weighted average force
             total_fx_expected = 0.0
             total_fy_expected = 0.0
             total_weight = 0.0
-            force_count = 0
             
             for r_data in region_data:
-                # Weight by gradient magnitude (stronger field = more influence)
                 weight = r_data['grad_mag']
-                
                 fx = coeff * r_data['gradBx'] * force_mult
                 fy = coeff * r_data['gradBy'] * force_mult
-                
                 total_fx_expected += fx * weight
                 total_fy_expected += fy * weight
                 total_weight += weight
-                force_count += 1
             
-            # Average force (weighted by field strength)
             if total_weight > 0:
                 avg_fx = total_fx_expected / total_weight
                 avg_fy = total_fy_expected / total_weight
@@ -426,137 +616,534 @@ def create_liggghts_integration(x_fem, y_fem, Bx, By, gradBx, gradBy,
                 avg_fx = 0.0
                 avg_fy = 0.0
             
-            # Apply single uniform force to this particle type
-            f.write(f"# Spatially-averaged force for Type {ptype}:\n")
-            f.write(f"# Fx = {avg_fx:.6e} N, Fy = {avg_fy:.6e} N\n")
+            f.write(f"print '  Weighted average force: Fx={avg_fx:.6e} N, Fy={avg_fy:.6e} N'\n")
             
-            if abs(avg_fx) > 1e-25 or abs(avg_fy) > 1e-25:
-                f.write(f"fix magf_t{ptype} type{ptype}_particles addforce {avg_fx:.12e} {avg_fy:.12e} 0.0\n\n")
-            else:
-                f.write(f"# Force negligible, not applied\n\n")
-            
-            # Calculate expected force statistics
+            # Calculate force magnitude and ratio
             m_particle = props['density'] * V
             f_gravity = m_particle * config['gravity']
             force_mag = np.sqrt(avg_fx**2 + avg_fy**2)
             force_ratio = force_mag / f_gravity if f_gravity > 0 else 0
             
-            f.write(f"# Single particle gravity: {f_gravity:.6e} N\n")
-            f.write(f"# Force magnitude: {force_mag:.6e} N\n")
-            f.write(f"# Force ratio (F_mag/F_grav): {force_ratio:.3f}x\n\n")
+            f.write(f"print '  Particle mass: {m_particle:.6e} kg'\n")
+            f.write(f"print '  Gravity force: {f_gravity:.6e} N (downward)'\n")
+            f.write(f"print '  Magnetic force magnitude: {force_mag:.6e} N'\n")
+            f.write(f"print '  Force ratio F_mag/F_grav: {force_ratio:.4f}'\n")
             
-            # Calculate expected force statistics
-            force_mag_expected = np.sqrt(total_fx_expected**2 + total_fy_expected**2)
+            # Apply force
+            if abs(avg_fx) > 1e-25 or abs(avg_fy) > 1e-25:
+                f.write(f"fix magf_t{ptype} type{ptype}_particles addforce {avg_fx:.12e} {avg_fy:.12e} 0.0\n")
+                f.write(f"print '  ✓ Applied fix magf_t{ptype}'\n")
+            else:
+                f.write(f"print '  ✗ Force negligible, not applied'\n")
             
-            # Compare to gravity for this particle type
-            m_particle = props['density'] * V
-            f_gravity = m_particle * config['gravity']
-            force_ratio = force_mag_expected / f_gravity if f_gravity > 0 else 0
-            
-            f.write(f"\n# Type {ptype}: {force_count} force fixes created\n")
-            f.write(f"# Expected total force: Fx={total_fx_expected:.6e} N, Fy={total_fy_expected:.6e} N\n")
-            f.write(f"# Expected |F_mag|: {force_mag_expected:.6e} N\n")
-            f.write(f"# Single particle gravity: {f_gravity:.6e} N\n")
-            f.write(f"# Force ratio (F_mag/F_grav per region): {force_ratio/force_count if force_count > 0 else 0:.3f}x\n\n")
-
-        # Print comprehensive summary
-        print(f"\n{'='*80}")
-        print("FORCE APPLICATION SUMMARY")
-        print(f"{'='*80}")
-        for ptype, props in particles.items():
-            chi = props['chi']
-            r = props['r']
-            V = (4/3) * np.pi * r**3
-            m = props['density'] * V
-            f_grav = m * config['gravity']
-            
-            print(f"\nType {ptype} ({props['name']}):")
-            print(f"  Radius: {r*1e6:.1f} μm")
-            print(f"  Mass: {m:.6e} kg")
-            print(f"  Gravity force: {f_grav:.6e} N")
-            print(f"  Magnetic susceptibility: {chi:.2e}")
-            print(f"  Force coefficient: {chi * V / MU0:.6e}")
-            
-            # Estimate typical magnetic force
-            typical_grad = np.median(np.sqrt(gradBx**2 + gradBy**2))
-            f_mag_typical = abs(chi * V / MU0) * typical_grad * force_mult
-            print(f"  Typical magnetic force: {f_mag_typical:.6e} N")
-            print(f"  F_mag/F_grav ratio: {f_mag_typical/f_grav:.3f}x")
-        print(f"{'='*80}\n")
+            f.write("print ''\n")
         
-        # Add damping
-        f.write("# === VELOCITY DAMPING ===\n")
-        damping = 1e-4  # Gentle damping
+        f.write("print '==============================================================================='\n\n")
+        
+        # =====================================================================
+        # VERIFY FORCES ARE ACTIVE
+        # =====================================================================
+        f.write("# " + "="*74 + "\n")
+        f.write("# DEBUG: VERIFY FORCES ARE ACTIVE\n")
+        f.write("# " + "="*74 + "\n")
+        f.write("print 'Checking if forces are actually applied...'\n")
+        f.write("print '-------------------------------------------------------------------------------'\n")
+        f.write("print 'Force verification from thermo output (step 900001):'\n")
+        f.write("print '  Total Fx (all particles) = shown in thermo as c_fx_all'\n")
+        f.write("print '  Total Fy (all particles) = shown in thermo as c_fy_all'\n")
+        f.write("print '  Type 4 Fx = shown in thermo as c_fx_t4'\n")
+        f.write("print '  Type 4 Fy = shown in thermo as c_fy_t4'\n")
+        f.write("print '  '\n")
+        f.write("print '✓ If values are NON-ZERO → magnetic forces are active'\n")
+        f.write("print '✓ If values are ~0 → magnetic forces NOT working'\n")
+        f.write("print '-------------------------------------------------------------------------------'\n")
+        f.write("print 'Note: Forces include gravity + magnetic + contact + damping'\n")
+        f.write("print '==============================================================================='\n\n")
+        
+        # =====================================================================
+        # VELOCITY DAMPING
+        # =====================================================================
+        f.write("# " + "="*74 + "\n")
+        f.write("# DEBUG: VELOCITY DAMPING\n")
+        f.write("# " + "="*74 + "\n")
+        damping = 1e-4
+        f.write(f"print 'Applying velocity damping: {damping:.6e} (kg/s)'\n")
         for ptype in particles.keys():
             f.write(f"fix damp_t{ptype} type{ptype}_particles viscous {damping:.6e}\n")
-        f.write("\n")
+            f.write(f"print '  ✓ Damping applied to type {ptype}'\n")
+        f.write("print '==============================================================================='\n\n")
         
-        f.write("print 'Magnetic field activated'\n")
-        f.write(f"print '  - {region_count} field regions'\n")
-        f.write(f"print '  - {len(particles)} particle types'\n")
-        f.write(f"print '  - Method: fix addforce with numeric values'\n")
+        # =====================================================================
+        # POST-APPLICATION STATE
+        # =====================================================================
+        f.write("# " + "="*74 + "\n")
+        f.write("# DEBUG: IMMEDIATE POST-ACTIVATION STATE\n")
+        f.write("# " + "="*74 + "\n")
+        f.write("print 'System state immediately after magnetic field activation:'\n")
+        f.write("print '-------------------------------------------------------------------------------'\n")
+        
+        # Check positions haven't changed yet
+        for ptype in particles.keys():
+            f.write(f"variable com_x_{ptype}_post equal xcm(type{ptype}_particles,x)\n")
+            f.write(f"variable com_y_{ptype}_post equal xcm(type{ptype}_particles,y)\n")
+            f.write(f"print 'Type {ptype} COM (post-activation): (${{com_x_{ptype}_post}}, ${{com_y_{ptype}_post}}) m'\n")
+            f.write(f"variable delta_x_{ptype} equal v_com_x_{ptype}_post-v_com_x_{ptype}_init\n")
+            f.write(f"variable delta_y_{ptype} equal v_com_y_{ptype}_post-v_com_y_{ptype}_init\n")
+            f.write(f"print 'Type {ptype} COM displacement: (${{delta_x_{ptype}}}, ${{delta_y_{ptype}}}) m (should be ~0)'\n")
+        
+        f.write("print '==============================================================================='\n\n")
+        
+        # =====================================================================
+        # TRACKING VARIABLES FOR CONTINUOUS MONITORING
+        # =====================================================================
+        f.write("# " + "="*74 + "\n")
+        f.write("# DEBUG: SETUP CONTINUOUS MONITORING\n")
+        f.write("# " + "="*74 + "\n")
+        f.write("print 'Setting up variables for continuous monitoring...'\n")
+        f.write("print '(These will be used in thermo_style)'\n")
+        f.write("print '-------------------------------------------------------------------------------'\n")
+        
+        # Kinetic energy tracking
+        for ptype in particles.keys():
+            f.write(f"compute ke_t{ptype} type{ptype}_particles ke/atom\n")
+            f.write(f"variable ke_avg_t{ptype} equal ave(c_ke_t{ptype})\n")
+            f.write(f"variable ke_total_t{ptype} equal sum(c_ke_t{ptype})\n")
+        
+        # Position extrema
+        for ptype in particles.keys():
+            f.write(f"variable x_min_t{ptype} equal bound(type{ptype}_particles,xmin)\n")
+            f.write(f"variable x_max_t{ptype} equal bound(type{ptype}_particles,xmax)\n")
+            f.write(f"variable y_min_t{ptype} equal bound(type{ptype}_particles,ymin)\n")
+            f.write(f"variable y_max_t{ptype} equal bound(type{ptype}_particles,ymax)\n")
+            f.write(f"variable z_min_t{ptype} equal bound(type{ptype}_particles,zmin)\n")
+            f.write(f"variable z_max_t{ptype} equal bound(type{ptype}_particles,zmax)\n")
+        
+        # Velocity RMS
+        for ptype in particles.keys():
+            f.write(f"variable vrms_x_t{ptype} equal sqrt(ave(vx*vx))\n")
+            f.write(f"variable vrms_y_t{ptype} equal sqrt(ave(vy*vy))\n")
+            f.write(f"variable vrms_z_t{ptype} equal sqrt(ave(vz*vz))\n")
+        
+        f.write("print '✓ Monitoring variables created'\n")
+        f.write("print '==============================================================================='\n\n")
+        
+        # =====================================================================
+        # EXPECTED BEHAVIOR PREDICTIONS
+        # =====================================================================
+        f.write("# " + "="*74 + "\n")
+        f.write("# DEBUG: EXPECTED BEHAVIOR PREDICTIONS\n")
+        f.write("# " + "="*74 + "\n")
+        f.write("print 'Predicted particle behavior based on magnetic susceptibility:'\n")
+        f.write("print '-------------------------------------------------------------------------------'\n")
+        
+        for ptype, props in particles.items():
+            chi = props['chi']
+            if chi < 0:
+                f.write(f"print 'Type {ptype} (χ={chi:.2e}): DIAMAGNETIC'\n")
+                f.write(f"print '  → Expected: Repelled from high-field regions (coil center)'\n")
+                f.write(f"print '  → Should move AWAY from ({x_dem_center:.4f}, {y_dem_center:.4f})'\n")
+            elif chi > 0:
+                f.write(f"print 'Type {ptype} (χ={chi:.2e}): PARAMAGNETIC'\n")
+                f.write(f"print '  → Expected: Attracted to high-field regions (coil center)'\n")
+                f.write(f"print '  → Should move TOWARD ({x_dem_center:.4f}, {y_dem_center:.4f})'\n")
+            else:
+                f.write(f"print 'Type {ptype} (χ={chi:.2e}): NON-MAGNETIC'\n")
+                f.write(f"print '  → Expected: No magnetic response (gravity only)'\n")
+        
+        f.write("print '==============================================================================='\n\n")
+        
+        # =====================================================================
+        # FIELD STATISTICS
+        # =====================================================================
+        f.write("# " + "="*74 + "\n")
+        f.write("# DEBUG: MAGNETIC FIELD STATISTICS\n")
+        f.write("# " + "="*74 + "\n")
+        f.write("print 'Magnetic field gradient statistics:'\n")
+        f.write("print '-------------------------------------------------------------------------------'\n")
+        
+        # Calculate statistics
+        grad_mags = [r['grad_mag'] for r in region_data]
+        gradBx_vals = [r['gradBx'] for r in region_data]
+        gradBy_vals = [r['gradBy'] for r in region_data]
+        
+        f.write(f"print 'Total active regions: {len(region_data)}'\n")
+        f.write(f"print '|(B·∇)B| max: {max(grad_mags):.6e} T²/m'\n")
+        f.write(f"print '|(B·∇)B| min: {min(grad_mags):.6e} T²/m'\n")
+        f.write(f"print '|(B·∇)B| mean: {np.mean(grad_mags):.6e} T²/m'\n")
+        f.write(f"print '|(B·∇)B| median: {np.median(grad_mags):.6e} T²/m'\n")
+        f.write(f"print '(B·∇)Bx range: [{min(gradBx_vals):.6e}, {max(gradBx_vals):.6e}] T²/m'\n")
+        f.write(f"print '(B·∇)By range: [{min(gradBy_vals):.6e}, {max(gradBy_vals):.6e}] T²/m'\n")
+        f.write("print '==============================================================================='\n\n")
+        
+        # =====================================================================
+        # SPATIAL COVERAGE
+        # =====================================================================
+        f.write("# " + "="*74 + "\n")
+        f.write("# DEBUG: SPATIAL COVERAGE OF MAGNETIC FIELD\n")
+        f.write("# " + "="*74 + "\n")
+        f.write("print 'Magnetic field spatial extent:'\n")
+        f.write("print '-------------------------------------------------------------------------------'\n")
+        
+        x_los = [r['x_lo'] for r in region_data]
+        x_his = [r['x_hi'] for r in region_data]
+        y_los = [r['y_lo'] for r in region_data]
+        y_his = [r['y_hi'] for r in region_data]
+        
+        f.write(f"print 'X coverage: [{min(x_los):.6f}, {max(x_his):.6f}] m'\n")
+        f.write(f"print 'Y coverage: [{min(y_los):.6f}, {max(y_his):.6f}] m'\n")
+        f.write(f"print 'Z coverage: [{domain["z_min"]:.6f}, {domain["z_max"]:.6f}] m'\n")
+        f.write(f"print 'Field width (X): {max(x_his) - min(x_los):.6f} m ({(max(x_his) - min(x_los))*100:.2f} cm)'\n")
+        f.write(f"print 'Field width (Y): {max(y_his) - min(y_los):.6f} m ({(max(y_his) - min(y_los))*100:.2f} cm)'\n")
+        f.write(f"print 'Field width (Z): {domain["z_max"] - domain["z_min"]:.6f} m ({(domain["z_max"] - domain["z_min"])*100:.2f} cm)'\n")
+        
+        # Check overlap with DEM domain
+        field_x_min, field_x_max = min(x_los), max(x_his)
+        field_y_min, field_y_max = min(y_los), max(y_his)
+        
+        overlap_x_min = max(field_x_min, domain['x_min'])
+        overlap_x_max = min(field_x_max, domain['x_max'])
+        overlap_y_min = max(field_y_min, domain['y_min'])
+        overlap_y_max = min(field_y_max, domain['y_max'])
+        
+        if overlap_x_max > overlap_x_min and overlap_y_max > overlap_y_min:
+            coverage_x = (overlap_x_max - overlap_x_min) / (domain['x_max'] - domain['x_min']) * 100
+            coverage_y = (overlap_y_max - overlap_y_min) / (domain['y_max'] - domain['y_min']) * 100
+            f.write(f"print 'DEM domain coverage: X={coverage_x:.1f}%, Y={coverage_y:.1f}%'\n")
+        else:
+            f.write("print 'WARNING: Magnetic field does NOT overlap with DEM domain!'\n")
+        
+        f.write("print '==============================================================================='\n\n")
+
+        f.write("# DEBUG: PARTICLE-FIELD OVERLAP CHECK\n")
+        f.write("# " + "="*74 + "\n")
+        f.write("print 'Checking if particles are actually in field regions...'\n")
+        f.write("print '-------------------------------------------------------------------------------'\n")
+
+        for ptype in particles.keys():
+            f.write(f"variable com_x_{ptype}_check equal xcm(type{ptype}_particles,x)\n")
+            f.write(f"variable com_y_{ptype}_check equal xcm(type{ptype}_particles,y)\n")
+            f.write(f"variable com_z_{ptype}_check equal xcm(type{ptype}_particles,z)\n")
+
+        f.write("run 0\n\n")
+
+        for ptype in particles.keys():
+            f.write(f"print 'Type {ptype} COM: (${{com_x_{ptype}_check}}, ${{com_y_{ptype}_check}}, ${{com_z_{ptype}_check}}) m'\n")
+
+        f.write(f"print 'Field X range: [{min(x_los):.6f}, {max(x_his):.6f}] m'\n")
+        f.write(f"print 'Field Y range: [{min(y_los):.6f}, {max(y_his):.6f}] m'\n")
+        f.write(f"print 'Field Z range: [{domain["z_min"]:.6f}, {domain["z_max"]:.6f}] m'\n")
+        f.write("print ''\n")
+        f.write("print 'OVERLAP CHECK:'\n")
+
+        # Check if COM is in field bounds
+        for ptype in particles.keys():
+            # This requires storing COM values, so just print comparison
+            f.write(f"print '  Type {ptype}: Check if COM is within field bounds above'\n")
+
+        f.write("print '==============================================================================='\n\n")
+        
+        # =====================================================================
+        # SAMPLE REGION DETAILS
+        # =====================================================================
+        f.write("# " + "="*74 + "\n")
+        f.write("# DEBUG: SAMPLE REGION DETAILS (First 5)\n")
+        f.write("# " + "="*74 + "\n")
+        f.write("print 'Detailed information for first 5 regions:'\n")
+        f.write("print '-------------------------------------------------------------------------------'\n")
+        
+        for r_data in region_data[:5]:
+            rid = r_data['id']
+            f.write(f"print 'Region {rid}:'\n")
+            f.write(f"print '  X: [{r_data["x_lo"]:.8f}, {r_data["x_hi"]:.8f}] m'\n")
+            f.write(f"print '  Y: [{r_data["y_lo"]:.8f}, {r_data["y_hi"]:.8f}] m'\n")
+            f.write(f"print '  (B·∇)Bx: {r_data["gradBx"]:.6e} T²/m'\n")
+            f.write(f"print '  (B·∇)By: {r_data["gradBy"]:.6e} T²/m'\n")
+            f.write(f"print '  |(B·∇)B|: {r_data["grad_mag"]:.6e} T²/m'\n")
+            
+            # Calculate force for each particle type in this region
+            for ptype, props in particles.items():
+                chi = props['chi']
+                r = props['r']
+                V = (4/3) * np.pi * r**3
+                coeff = chi * V / MU0
+                fx = coeff * r_data['gradBx'] * force_mult
+                fy = coeff * r_data['gradBy'] * force_mult
+                f.write(f"print '  Force on Type {ptype}: ({fx:.6e}, {fy:.6e}) N'\n")
+            f.write("print ''\n")
+        
+        f.write("print '==============================================================================='\n\n")
+        
+        # =====================================================================
+        # FINAL ACTIVATION MESSAGE
+        # =====================================================================
+        f.write("# " + "="*74 + "\n")
+        f.write("# MAGNETIC FIELD ACTIVATION COMPLETE\n")
+        f.write("# " + "="*74 + "\n")
         f.write("print '==============================================================================='\n")
+        f.write("print 'MAGNETIC FIELD SUCCESSFULLY ACTIVATED'\n")
+        f.write("print '==============================================================================='\n")
+        f.write(f"print 'Configuration summary:'\n")
+        f.write(f"print '  • {region_count} active field regions'\n")
+        f.write(f"print '  • {len(particles)} particle types with magnetic forces'\n")
+        f.write(f"print '  • Force multiplier: {force_mult}'\n")
+        f.write(f"print '  • Velocity damping: {damping:.2e} kg/s'\n")
+        f.write("print '-------------------------------------------------------------------------------'\n")
+        f.write("print 'IMPORTANT: Check thermo output for particle motion over time'\n")
+        f.write("print 'Expected observations:'\n")
+        
+        for ptype, props in particles.items():
+            chi = props['chi']
+            if chi < 0:
+                f.write(f"print '  • Type {ptype}: Should drift AWAY from coil center (diamagnetic)'\n")
+            elif chi > 0:
+                f.write(f"print '  • Type {ptype}: Should drift TOWARD coil center (paramagnetic)'\n")
+        
+        f.write("print '==============================================================================='\n\n")
+        
+        # =====================================================================
+        # SUGGEST ENHANCED THERMO STYLE
+        # =====================================================================
+        f.write("# " + "="*74 + "\n")
+        f.write("# SUGGESTED ENHANCED THERMO OUTPUT\n")
+        f.write("# " + "="*74 + "\n")
+        f.write("# Uncomment the lines below to add detailed monitoring to thermo output:\n")
+        f.write("#\n")
+        
+        # Build thermo_style command
+        thermo_vars = ["step", "time", "atoms", "ke", "pe", "etotal"]
+        
+        for ptype in particles.keys():
+            thermo_vars.append(f"v_n_type{ptype}")
+            thermo_vars.append(f"v_com_x_{ptype}_post")
+            thermo_vars.append(f"v_com_y_{ptype}_post")
+            thermo_vars.append(f"v_ke_avg_t{ptype}")
+        
+        f.write(f"# thermo_style custom {' '.join(thermo_vars)}\n")
+        f.write("# thermo 1000\n")
+        f.write("#\n")
+        f.write("# This will print:\n")
+        f.write("#   - Simulation step and time\n")
+        f.write("#   - Total atoms, kinetic energy, potential energy\n")
+        f.write("#   - Per-type: count, COM position, average KE\n")
+        f.write("# " + "="*74 + "\n\n")
+        
+        # =====================================================================
+        # CHECKPOINT SUGGESTIONS
+        # =====================================================================
+        f.write("# " + "="*74 + "\n")
+        f.write("# DEBUGGING CHECKPOINTS DURING SIMULATION\n")
+        f.write("# " + "="*74 + "\n")
+        f.write("# Add these commands at key points in your main script to track evolution:\n")
+        f.write("#\n")
+        f.write("# Every N steps (e.g., 10000):\n")
+        f.write("# print '=== CHECKPOINT: Step $(step), Time $(time) s ==='\n")
+        
+        for ptype in particles.keys():
+            f.write(f"# print 'Type {ptype} COM: (${{com_x_{ptype}_post}}, ${{com_y_{ptype}_post}}) m'\n")
+            f.write(f"# print 'Type {ptype} bounds: X=[${{x_min_t{ptype}}}, ${{x_max_t{ptype}}}], Y=[${{y_min_t{ptype}}}, ${{y_max_t{ptype}}}]'\n")
+            f.write(f"# print 'Type {ptype} <KE>: ${{ke_avg_t{ptype}}} J'\n")
+        
+        f.write("# print '======================================'\n")
+        f.write("#\n")
+        f.write("# " + "="*74 + "\n\n")
     
     print(f"✓ LIGGGHTS integration file created: magnetic_field_apply.lmp")
     print(f"  - {region_count} regions defined")
-    print(f"  - {region_count * len(particles)} force fixes")
-    print(f"  - Pure numeric values (no variables)")
+    print(f"  - COMPREHENSIVE DEBUGGING enabled")
+    print(f"  - Pre-activation checks")
+    print(f"  - Post-activation verification")
+    print(f"  - Continuous monitoring variables")
+    print(f"  - Expected behavior predictions")
+    print(f"  - Sample region details")
+    print(f"  - Force verification")
+    print(f"  - Spatial coverage analysis")
 
 def create_visualizations(x_grid, y_grid, Bx, By, B, gradBx, gradBy, grad_mag, 
                          force_mult, config):
     """Create field visualization"""
     
-    X, Y = np.meshgrid(x_grid, y_grid)
+    domain = config['domain']
+    
+    # ============================================================================
+    # CRITICAL: Use DEM coordinate system for ALL plots
+    # ============================================================================
+    # Calculate coordinate transformation (same as in create_liggghts_integration)
+    x_coil_center_fem = (x_grid.min() + x_grid.max()) / 2.0
+    y_coil_center_fem = (y_grid.min() + y_grid.max()) / 2.0
+    
+    x_dem_center = (domain['x_min'] + domain['x_max']) / 2.0
+    y_dem_center = (domain['y_min'] + domain['y_max']) / 2.0
+    
+    # Offset to map FEM coil center → DEM center
+    offset_x = x_coil_center_fem - x_dem_center
+    offset_y = y_coil_center_fem - y_dem_center
+    
+    # Create meshgrid and transform to DEM coordinates
+    X_fem, Y_fem = np.meshgrid(x_grid, y_grid)
+    X_dem = (X_fem - offset_x) * 100  # Convert to cm
+    Y_dem = (Y_fem - offset_y) * 100
+    
+    # DEM domain boundaries in cm
+    x_dem_min, x_dem_max = domain['x_min'] * 100, domain['x_max'] * 100
+    y_dem_min, y_dem_max = domain['y_min'] * 100, domain['y_max'] * 100
+    
+    # ============================================================================
+    # Create 6-panel plot in DEM coordinates
+    # ============================================================================
     fig, axes = plt.subplots(2, 3, figsize=(18, 12))
     
     # Field magnitude
-    im1 = axes[0,0].contourf(X*100, Y*100, B, levels=30, cmap='viridis')
+    im1 = axes[0,0].contourf(X_dem, Y_dem, B, levels=30, cmap='viridis')
     axes[0,0].set_title('|B| Field Magnitude')
-    axes[0,0].set_xlabel('X (cm)')
-    axes[0,0].set_ylabel('Y (cm)')
+    axes[0,0].set_xlabel('X (cm) - DEM Coordinates')
+    axes[0,0].set_ylabel('Y (cm) - DEM Coordinates')
     plt.colorbar(im1, ax=axes[0,0], label='Tesla')
     
     # Bx component
-    im2 = axes[0,1].contourf(X*100, Y*100, Bx, levels=30, cmap='RdBu_r')
+    im2 = axes[0,1].contourf(X_dem, Y_dem, Bx, levels=30, cmap='RdBu_r')
     axes[0,1].set_title('Bx Component')
-    axes[0,1].set_xlabel('X (cm)')
-    axes[0,1].set_ylabel('Y (cm)')
+    axes[0,1].set_xlabel('X (cm) - DEM Coordinates')
+    axes[0,1].set_ylabel('Y (cm) - DEM Coordinates')
     plt.colorbar(im2, ax=axes[0,1], label='Tesla')
     
     # By component
-    im3 = axes[0,2].contourf(X*100, Y*100, By, levels=30, cmap='RdBu_r')
+    im3 = axes[0,2].contourf(X_dem, Y_dem, By, levels=30, cmap='RdBu_r')
     axes[0,2].set_title('By Component')
-    axes[0,2].set_xlabel('X (cm)')
-    axes[0,2].set_ylabel('Y (cm)')
+    axes[0,2].set_xlabel('X (cm) - DEM Coordinates')
+    axes[0,2].set_ylabel('Y (cm) - DEM Coordinates')
     plt.colorbar(im3, ax=axes[0,2], label='Tesla')
     
     # (B·∇)Bx
-    im4 = axes[1,0].contourf(X*100, Y*100, gradBx, levels=30, cmap='plasma')
+    im4 = axes[1,0].contourf(X_dem, Y_dem, gradBx, levels=30, cmap='plasma')
     axes[1,0].set_title('(B·∇)Bx')
-    axes[1,0].set_xlabel('X (cm)')
-    axes[1,0].set_ylabel('Y (cm)')
+    axes[1,0].set_xlabel('X (cm) - DEM Coordinates')
+    axes[1,0].set_ylabel('Y (cm) - DEM Coordinates')
     plt.colorbar(im4, ax=axes[1,0], label='T²/m', format='%.2e')
     
     # (B·∇)By
-    im5 = axes[1,1].contourf(X*100, Y*100, gradBy, levels=30, cmap='plasma')
+    im5 = axes[1,1].contourf(X_dem, Y_dem, gradBy, levels=30, cmap='plasma')
     axes[1,1].set_title('(B·∇)By')
-    axes[1,1].set_xlabel('X (cm)')
-    axes[1,1].set_ylabel('Y (cm)')
+    axes[1,1].set_xlabel('X (cm) - DEM Coordinates')
+    axes[1,1].set_ylabel('Y (cm) - DEM Coordinates')
     plt.colorbar(im5, ax=axes[1,1], label='T²/m', format='%.2e')
     
     # |(B·∇)B|
-    im6 = axes[1,2].contourf(X*100, Y*100, grad_mag, levels=30, cmap='hot')
+    im6 = axes[1,2].contourf(X_dem, Y_dem, grad_mag, levels=30, cmap='hot')
     axes[1,2].set_title('|(B·∇)B| Total Gradient')
-    axes[1,2].set_xlabel('X (cm)')
-    axes[1,2].set_ylabel('Y (cm)')
+    axes[1,2].set_xlabel('X (cm) - DEM Coordinates')
+    axes[1,2].set_ylabel('Y (cm) - DEM Coordinates')
     plt.colorbar(im6, ax=axes[1,2], label='T²/m', format='%.2e')
     
-    plt.suptitle('Magnetic Field Analysis for LIGGGHTS', fontsize=14, fontweight='bold')
+    # ============================================================================
+    # Overlay DEM domain and markers on all plots
+    # ============================================================================
+    for ax in axes.flat:
+        # Draw DEM domain as red rectangle
+        ax.plot([x_dem_min, x_dem_max, x_dem_max, x_dem_min, x_dem_min],
+                [y_dem_min, y_dem_min, y_dem_max, y_dem_max, y_dem_min],
+                'r-', linewidth=2, label='DEM Domain')
+        
+        # Mark DEM center (at origin in DEM coordinates)
+        ax.plot(x_dem_center * 100, y_dem_center * 100, 'r+', 
+                markersize=15, markeredgewidth=3, label='DEM Center (0,0)')
+        
+        # Mark FEM coil center in DEM coordinates (should overlap with DEM center)
+        fem_center_in_dem_x = (x_coil_center_fem - offset_x) * 100
+        fem_center_in_dem_y = (y_coil_center_fem - offset_y) * 100
+        ax.plot(fem_center_in_dem_x, fem_center_in_dem_y, 'bx', 
+                markersize=15, markeredgewidth=3, label='FEM Coil Center')
+        
+        # Add particle region (green box)
+        particle_x_min = (domain['x_min'] + 0.006) * 100
+        particle_x_max = (domain['x_max'] - 0.006) * 100
+        particle_y_min = (domain['y_min'] + 0.006) * 100
+        particle_y_max = (domain['y_max'] - 0.006) * 100
+        
+        from matplotlib.patches import Rectangle
+        particle_region = Rectangle((particle_x_min, particle_y_min),
+                                    particle_x_max - particle_x_min,
+                                    particle_y_max - particle_y_min,
+                                    fill=True, facecolor='lime', alpha=0.15,
+                                    edgecolor='green', linewidth=2,
+                                    label='Particle Region')
+        ax.add_patch(particle_region)
+        
+        ax.legend(loc='upper right', fontsize=7)
+        ax.grid(True, alpha=0.3)
+        ax.set_aspect('equal')
+        
+        # Set limits to show full context
+        margin = 0.5  # cm
+        ax.set_xlim(x_dem_min - margin, x_dem_max + margin)
+        ax.set_ylim(y_dem_min - margin, y_dem_max + margin)
+    
+    plt.suptitle('Magnetic Field Analysis for LIGGGHTS\n(All coordinates in DEM reference frame)', 
+                 fontsize=14, fontweight='bold')
     plt.tight_layout()
     plt.savefig('magnetic_field_analysis.png', dpi=300, bbox_inches='tight')
     plt.close()
     
     print("✓ Visualization saved: magnetic_field_analysis.png")
+    print(f"  All 6 panels now use DEM coordinates with proper alignment")
+
+    # ============================================================================
+    # Debug overlay plot (same as before, but ensure consistency)
+    # ============================================================================
+    fig_debug, ax_debug = plt.subplots(1, 1, figsize=(12, 12))
+    
+    # Plot field magnitude IN DEM COORDINATES
+    im = ax_debug.contourf(X_dem, Y_dem, grad_mag, levels=30, cmap='hot', alpha=0.6)
+    plt.colorbar(im, ax=ax_debug, label='|(B·∇)B| (T²/m)')
+    
+    # Overlay DEM domain
+    ax_debug.plot([x_dem_min, x_dem_max, x_dem_max, x_dem_min, x_dem_min],
+                  [y_dem_min, y_dem_min, y_dem_max, y_dem_max, y_dem_min],
+                  'r-', linewidth=3, label='DEM Domain')
+    
+    # Mark DEM center
+    ax_debug.plot(x_dem_center * 100, y_dem_center * 100, 'r+', 
+                  markersize=25, markeredgewidth=4, label='DEM Center (0,0)')
+    
+    # Mark FEM coil center IN DEM COORDINATES
+    ax_debug.plot(fem_center_in_dem_x, fem_center_in_dem_y, 'bx', 
+                  markersize=25, markeredgewidth=4, label='FEM Coil Center (mapped)')
+    
+    # Particle region
+    particle_region_debug = Rectangle((particle_x_min, particle_y_min),
+                                      particle_x_max - particle_x_min,
+                                      particle_y_max - particle_y_min,
+                                      fill=True, facecolor='lime', alpha=0.3,
+                                      edgecolor='green', linewidth=3,
+                                      label='Expected Particle X-Y Region')
+    ax_debug.add_patch(particle_region_debug)
+    
+    # Text annotation
+    ax_debug.text(0, y_dem_max * 0.9, 
+                  'Particles settle across\nfull X-Y domain\n(at Z ≈ 0-5mm)',
+                  ha='center', va='top', fontsize=12, 
+                  bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.7))
+    
+    ax_debug.set_xlabel('X (cm) - DEM Coordinates', fontsize=12)
+    ax_debug.set_ylabel('Y (cm) - DEM Coordinates', fontsize=12)
+    ax_debug.set_title('Field-Particle Overlap Check\n(All coordinates in DEM reference frame)', 
+                       fontsize=14, fontweight='bold')
+    ax_debug.legend(loc='lower right', fontsize=10)
+    ax_debug.grid(True, alpha=0.3)
+    ax_debug.set_aspect('equal')
+    
+    # Set limits
+    ax_debug.set_xlim(x_dem_min - margin, x_dem_max + margin)
+    ax_debug.set_ylim(y_dem_min - margin, y_dem_max + margin)
+    
+    plt.tight_layout()
+    plt.savefig('magnetic_field_debug_overlay.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print("✓ Debug overlay saved: magnetic_field_debug_overlay.png")
+    print(f"  Check that:")
+    print(f"    1. Red + and Blue X overlap (both at origin)")
+    print(f"    2. Green box covers most of DEM domain")
+    print(f"    3. Field (colored contours) covers particle region")
 
 def main():
     """Main execution"""
@@ -593,8 +1180,13 @@ def main():
             print("="*80)
             print("1. Run LIGGGHTS:")
             print(f"   liggghts < {liggghts_file}")
-            print("2. Check output in ParaView (post/*.vtk)")
-            print("3. Verify particles move away from high-field regions (diamagnetic)")
+            print("2. Check console output for all DEBUG sections")
+            print("3. Verify:")
+            print("   • Initial particle counts are correct")
+            print("   • Forces are non-zero and reasonable")
+            print("   • Particles are in magnetic field regions")
+            print("   • COM motion matches expected direction")
+            print("4. Check ParaView output (post/*.vtk)")
             print("="*80 + "\n")
         
         sys.exit(0 if success else 1)
