@@ -154,14 +154,14 @@ def get_dipole_strengths(t):
     """
     Returns array of 16 strength multipliers (0 to 1) for each dipole at time t
     
-    Phase schedule:
-    0: Settle (0.0-0.5s) - all off
-    1: Cluster (0.5-2.0s) - D0,D1,D2,D3 on
-    2: Move C0→top (2.0-4.0s) - D0 off, D4 on
-    3: Move C1→right (4.0-6.0s) - D1 off, D6 on
-    4: Move C2→left (6.0-8.0s) - D2 off, D7 on
-    5: Move C3→bottom (8.0-9.5s) - D3 off, D5 on
-    6: Spread (9.5-12.0s) - Ring (D8-D15) on
+    Seven-phase schedule:
+    Phase 0: Settle (0.0-0.5s) - all off
+    Phase 1: Cluster (0.5-2.0s) - D0,D1,D2,D3 on
+    Phase 2: Move C0→top (2.0-4.0s) - D0 off, D4 on
+    Phase 3: Move C1→right (4.0-6.0s) - D1 off, D6 on
+    Phase 4: Move C2→left (6.0-8.0s) - D2 off, D7 on
+    Phase 5: Move C3→bottom (8.0-9.5s) - D3 off, D5 on
+    Phase 6: Spread (9.5-12.0s) - Ring (D8-D15) on
     """
     strengths = np.zeros(N_DIPOLES, dtype=np.float32)
     
@@ -524,9 +524,6 @@ def integrate_step_1():
         
         # Full-step position
         pos[i] += vel[i] * cfg.dt
-        
-        # Apply periodic boundary conditions (optional - currently using walls)
-        # Just ensure particles stay in reasonable bounds
 
 @ti.kernel
 def integrate_step_2():
