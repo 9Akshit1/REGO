@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<VTKFile type="Collection" version="0.1">
+<Collection>
+<DataSet timestep="0.049998" file="asm_0025000.vtu"/>
+<DataSet timestep="0.099998" file="asm_0050000.vtu"/>
+<DataSet timestep="0.149998" file="asm_0075000.vtu"/>
+<DataSet timestep="0.199998" file="asm_0100000.vtu"/>
+<DataSet timestep="0.249998" file="asm_0125000.vtu"/>
+<DataSet timestep="0.299998" file="asm_0150000.vtu"/>
+<DataSet timestep="0.349998" file="asm_0175000.vtu"/>
+<DataSet timestep="0.399998" file="asm_0200000.vtu"/>
+<DataSet timestep="0.449998" file="asm_0225000.vtu"/>
+<DataSet timestep="0.499998" file="asm_0250000.vtu"/>
+<DataSet timestep="0.549998" file="asm_0275000.vtu"/>
+<DataSet timestep="0.599998" file="asm_0300000.vtu"/>
+<DataSet timestep="0.649998" file="asm_0325000.vtu"/>
+</Collection>
+</VTKFile>

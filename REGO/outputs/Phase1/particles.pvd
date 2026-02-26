@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<VTKFile type="Collection" version="0.1" byte_order="LittleEndian">
+<Collection>
+<DataSet timestep="0.0" file="particles_t0.0000.vtu"/>
+<DataSet timestep="0.05" file="particles_t0.0500.vtu"/>
+<DataSet timestep="0.1" file="particles_t0.1000.vtu"/>
+<DataSet timestep="0.15" file="particles_t0.1500.vtu"/>
+<DataSet timestep="0.2" file="particles_t0.2000.vtu"/>
+<DataSet timestep="0.25" file="particles_t0.2500.vtu"/>
+<DataSet timestep="0.3" file="particles_t0.3000.vtu"/>
+<DataSet timestep="0.35" file="particles_t0.3500.vtu"/>
+<DataSet timestep="0.4" file="particles_t0.4000.vtu"/>
+<DataSet timestep="0.45" file="particles_t0.4500.vtu"/>
+<DataSet timestep="0.5" file="particles_t0.5000.vtu"/>
+<DataSet timestep="0.55" file="particles_t0.5500.vtu"/>
+<DataSet timestep="0.6" file="particles_t0.6000.vtu"/>
+<DataSet timestep="0.65" file="particles_t0.6500.vtu"/>
+<DataSet timestep="0.7" file="particles_t0.7000.vtu"/>
+<DataSet timestep="0.75" file="particles_t0.7500.vtu"/>
+<DataSet timestep="0.8" file="particles_t0.8000.vtu"/>
+<DataSet timestep="0.85" file="particles_t0.8500.vtu"/>
+<DataSet timestep="0.9" file="particles_t0.9000.vtu"/>
+<DataSet timestep="0.95" file="particles_t0.9500.vtu"/>
+<DataSet timestep="1.0" file="particles_t1.0000.vtu"/>
+<DataSet timestep="1.05" file="particles_t1.0500.vtu"/>
+<DataSet timestep="1.1" file="particles_t1.1000.vtu"/>
+<DataSet timestep="1.15" file="particles_t1.1500.vtu"/>
+</Collection>
+</VTKFile>
