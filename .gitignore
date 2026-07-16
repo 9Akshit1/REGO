@@ -1,8 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+
+# Local virtual environments
+rego_env/
+.venv/
+venv/
+
+# Vendored third-party libraries (cloned separately — see README)
+vendor/
+
+# Generated simulation outputs, checkpoints, logs
 post/
-*.png
+outputs/
 *.npz
-field_data.npz
+*.vtk
+*.vtu
+*.pvd
+*.pkl
 log.liggghts
-magnetic_field_analysis.png
 physics_summary.txt
-phase2_diagnostics.png
+restart_forced_*.data
+
+# Ansys Rocky scratch/cache directories
+**/*.rocky.files/tmp/
+**/*.rocky.files/simulation/
+
+# Generated plots/images (tracked doc assets are excluded below)
+*.png
+!docs/**/*.png

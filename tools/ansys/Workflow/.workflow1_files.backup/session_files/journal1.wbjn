@@ -1,0 +1,381 @@
+# encoding: utf-8
+# 2025 R2
+SetScriptVersion(Version="25.2.170")
+template1 = GetTemplate(
+    TemplateName="Magnetostatic",
+    Solver="ANSYS")
+system1 = template1.CreateSystem()
+template2 = GetTemplate(
+    TemplateName="Transient Thermal",
+    Solver="ANSYS")
+system2 = template2.CreateSystem()
+template3 = GetTemplate(
+    TemplateName="Static Structural",
+    Solver="ANSYS")
+system3 = template3.CreateSystem()
+template4 = GetTemplate(
+    TemplateName="Electric",
+    Solver="ANSYS")
+system4 = template4.CreateSystem()
+system4.Delete()
+template5 = GetTemplate(
+    TemplateName="Coupled Field Harmonic",
+    Solver="ANSYS")
+system5 = template5.CreateSystem(
+    Position="Right",
+    RelativeTo=system1)
+system1.Delete()
+system2.Delete()
+template6 = GetTemplate(TemplateName="EngData")
+system6 = template6.CreateSystem()
+engineeringData1 = system5.GetContainer(ComponentName="Engineering Data")
+matl1 = engineeringData1.CreateMaterial(Name="Regolith Composite")
+system6.Delete()
+matl1.Delete()
+system7 = template6.CreateSystem(
+    Position="Above",
+    RelativeTo=system5)
+engineeringData2 = system7.GetContainer(ComponentName="Engineering Data")
+matl2 = engineeringData2.CreateMaterial(Name="Regolith Composite")
+matl2.Description = "Regolith data"
+matlProp1 = matl2.CreateProperty(
+    Name="Density",
+    Qualifiers={"Definition": "", "Behavior": ""})
+matlProp2 = matl2.CreateProperty(
+    Name="Shear Modulus",
+    Qualifiers={"Definition": "", "Behavior": ""})
+matlProp3 = matl2.CreateProperty(
+    Name="Tensile Yield Strength",
+    Qualifiers={"Definition": "", "Behavior": ""})
+matlProp4 = matl2.CreateProperty(
+    Name="Principal Stress Failure",
+    Qualifiers={"Definition": "", "Behavior": ""})
+matlProp5 = matl2.CreateProperty(
+    Name="Thermal Conductivity",
+    Behavior="Isotropic",
+    Qualifiers={"Definition": "", "Behavior": "Isotropic"})
+matlProp5.SetVariableProperty(
+    VariableName="Thermal Conductivity",
+    Property="Unit",
+    Value="W m^-1 K^-1")
+matlProp5.SetData(
+    Index=-1,
+    Variables=["Thermal Conductivity"],
+    Values=[["0.1 [W m^-1 K^-1]"]])
+matlProp6 = matl2.CreateProperty(
+    Name="Specific Heat",
+    Definition="Constant Pressure",
+    Qualifiers={"Definition": "Constant Pressure", "Behavior": ""})
+matlProp7 = matl2.CreateProperty(
+    Name="Relative Permeability",
+    Behavior="Isotropic",
+    Qualifiers={"Definition": "", "Behavior": "Isotropic"})
+matlProp1.SetData(
+    SheetName="Density",
+    SheetQualifiers={"Definition": "", "Behavior": ""},
+    Index=-1,
+    Variables=["Temperature"],
+    Values=[["20 [C]"]])
+matlProp1.SetData(
+    SheetName="Density",
+    SheetQualifiers={"Definition": "", "Behavior": ""},
+    Variables=["Density"],
+    Values=[["1550 [kg m^-3]"]])
+matlProp1.SetData(
+    SheetName="Density",
+    SheetQualifiers={"Definition": "", "Behavior": ""},
+    Index=-1,
+    Variables=["Density"],
+    Values=[["1650 [kg m^-3]"]])
+matlProp1.SetData(
+    SheetName="Density",
+    SheetQualifiers={"Definition": "", "Behavior": ""},
+    Index=1,
+    Variables=["Temperature"],
+    Values=[["120 [C]"]])
+matlProp1.SetData(
+    SheetName="Density",
+    SheetQualifiers={"Definition": "", "Behavior": ""},
+    Variables=["Temperature"],
+    Values=[["120 [C]"]])
+matlProp1.SetData(
+    SheetName="Density",
+    SheetQualifiers={"Definition": "", "Behavior": ""},
+    Variables=["Density"],
+    Values=[["1650 [kg m^-3]"]])
+matlProp1.SetData(
+    SheetName="Density",
+    SheetQualifiers={"Definition": "", "Behavior": ""},
+    Index=1,
+    Variables=["Temperature"],
+    Values=[["20 [C]"]])
+matlProp1.SetData(
+    SheetName="Density",
+    SheetQualifiers={"Definition": "", "Behavior": ""},
+    Index=1,
+    Variables=["Density"],
+    Values=[["1550 [kg m^-3]"]])
+matlProp1.SetData(
+    SheetName="Density",
+    SheetQualifiers={"Definition": "", "Behavior": ""},
+    Index=-1,
+    Variables=["Temperature"],
+    Values=[["200 [C]"]])
+matlProp1.SetData(
+    SheetName="Density",
+    SheetQualifiers={"Definition": "", "Behavior": ""},
+    Index=2,
+    Variables=["Density"],
+    Values=[["1950 [kg m^-3]"]])
+matlProp8 = matl2.CreateProperty(
+    Name="Elasticity",
+    Behavior="Isotropic",
+    Qualifiers={"Definition": "", "Behavior": "Isotropic"})
+matlProp2.Delete()
+matlProp8.SetData(
+    SheetName="Elasticity",
+    SheetQualifiers={"Definition": "", "Behavior": "Isotropic", "Derive from": "Young's Modulus and Poisson's Ratio"},
+    Index=-1,
+    Variables=["Temperature"],
+    Values=[["20 [C]"]])
+matlProp8.SetData(
+    SheetName="Elasticity",
+    SheetQualifiers={"Definition": "", "Behavior": "Isotropic", "Derive from": "Young's Modulus and Poisson's Ratio"},
+    Variables=["Young's Modulus"],
+    Values=[["10000000 [Pa]"]])
+matlProp8.SetData(
+    SheetName="Elasticity",
+    SheetQualifiers={"Definition": "", "Behavior": "Isotropic", "Derive from": "Young's Modulus and Poisson's Ratio"},
+    Index=-1,
+    Variables=["Temperature"],
+    Values=[["200 [C]"]])
+matlProp8.SetData(
+    SheetName="Elasticity",
+    SheetQualifiers={"Definition": "", "Behavior": "Isotropic", "Derive from": "Young's Modulus and Poisson's Ratio"},
+    Index=1,
+    Variables=["Young's Modulus"],
+    Values=[["1000000000 [Pa]"]])
+matlProp8.SetData(
+    SheetName="Elasticity",
+    SheetQualifiers={"Definition": "", "Behavior": "Isotropic", "Derive from": "Young's Modulus and Poisson's Ratio"},
+    Index=1,
+    Variables=["Young's Modulus"],
+    Values=[["4000000000 [Pa]"]])
+matlProp8.SetData(
+    SheetName="Elasticity",
+    SheetQualifiers={"Definition": "", "Behavior": "Isotropic", "Derive from": "Young's Modulus and Poisson's Ratio"},
+    Variables=["Poisson's Ratio"],
+    Values=[["0.25"]])
+matlProp8.SetData(
+    SheetName="Elasticity",
+    SheetQualifiers={"Definition": "", "Behavior": "Isotropic", "Derive from": "Young's Modulus and Poisson's Ratio"},
+    Index=1,
+    Variables=["Poisson's Ratio"],
+    Values=[["0.25"]])
+matlProp3.SetData(
+    Index=-1,
+    Variables=["Tensile Yield Strength"],
+    Values=[["5000000 [Pa]"]])
+matlProp4.SetData(
+    Variables=["Maximum Tensile Stress"],
+    Values=[["5000000 [Pa]"]])
+matlProp4.SetData(
+    Variables=["Maximum Shear Stress"],
+    Values=[["10000000 [Pa]"]])
+matlProp6.BeginBatchUpdate()
+matlProp6.SetVariableProperty(
+    SheetName="Specific Heat",
+    SheetQualifiers={"Definition": "Constant Pressure", "Behavior": ""},
+    VariableName="Specific Heat",
+    Property="Unit",
+    Value="J kg^-1 K^-1")
+matlProp6.EndBatchUpdate()
+matlProp6.SetData(
+    SheetName="Specific Heat",
+    SheetQualifiers={"Definition": "Constant Pressure", "Behavior": ""},
+    Index=-1,
+    Variables=["Temperature"],
+    Values=[["20 [C]"]])
+matlProp6.SetData(
+    SheetName="Specific Heat",
+    SheetQualifiers={"Definition": "Constant Pressure", "Behavior": ""},
+    Variables=["Specific Heat"],
+    Values=[["800 [J kg^-1 K^-1]"]])
+matlProp6.SetData(
+    SheetName="Specific Heat",
+    SheetQualifiers={"Definition": "Constant Pressure", "Behavior": ""},
+    Variables=["Temperature"],
+    Values=[["7.8886090522101181E-31 [C]"]])
+matlProp5.SetData(
+    SheetName="Thermal Conductivity",
+    SheetQualifiers={"Definition": "", "Behavior": "Isotropic"},
+    Variables=["Temperature"],
+    Values=[["20 [C]"]])
+matlProp5.SetData(
+    SheetName="Thermal Conductivity",
+    SheetQualifiers={"Definition": "", "Behavior": "Isotropic"},
+    Variables=["Thermal Conductivity"],
+    Values=[["0.15 [W m^-1 K^-1]"]])
+matlProp5.SetData(
+    SheetName="Thermal Conductivity",
+    SheetQualifiers={"Definition": "", "Behavior": "Isotropic"},
+    Index=-1,
+    Variables=["Temperature"],
+    Values=[["200 [C]"]])
+matlProp5.SetData(
+    SheetName="Thermal Conductivity",
+    SheetQualifiers={"Definition": "", "Behavior": "Isotropic"},
+    Index=1,
+    Variables=["Thermal Conductivity"],
+    Values=[["0.4 [W m^-1 K^-1]"]])
+matlProp7.SetData(
+    Index=-1,
+    Variables=["Relative Permeability"],
+    Values=[["1.8"]])
+matlProp9 = matl2.CreateProperty(
+    Name="Relative Permittivity",
+    Behavior="Orthotropic",
+    Qualifiers={"Definition": "", "Behavior": "Orthotropic"})
+matlProp10 = matl2.CreateProperty(
+    Name="Resistivity",
+    Behavior="Isotropic",
+    Qualifiers={"Definition": "", "Behavior": "Isotropic"})
+matlProp11 = matl2.CreateProperty(
+    Name="Electric Loss Tangent",
+    Behavior="Isotropic",
+    Qualifiers={"Definition": "", "Behavior": "Isotropic"})
+matlProp8.SetData(
+    SheetName="Elasticity",
+    SheetQualifiers={"Definition": "", "Behavior": "Isotropic", "Derive from": "Young's Modulus and Poisson's Ratio"},
+    Index=-1,
+    Variables=["Temperature"],
+    Values=[["120 [C]"]])
+matlProp8.SetData(
+    SheetName="Elasticity",
+    SheetQualifiers={"Definition": "", "Behavior": "Isotropic", "Derive from": "Young's Modulus and Poisson's Ratio"},
+    Index=2,
+    Variables=["Young's Modulus"],
+    Values=[["15000000 [Pa]"]])
+matlProp8.SetData(
+    SheetName="Elasticity",
+    SheetQualifiers={"Definition": "", "Behavior": "Isotropic", "Derive from": "Young's Modulus and Poisson's Ratio"},
+    Index=2,
+    Variables=["Poisson's Ratio"],
+    Values=[["0.25"]])
+matlProp6.SetData(
+    SheetName="Specific Heat",
+    SheetQualifiers={"Definition": "Constant Pressure", "Behavior": ""},
+    Variables=["Temperature"],
+    Values=[["20 [C]"]])
+matlProp6.SetData(
+    SheetName="Specific Heat",
+    SheetQualifiers={"Definition": "Constant Pressure", "Behavior": ""},
+    Variables=["Specific Heat"],
+    Values=[["780 [J kg^-1 K^-1]"]])
+matlProp6.SetData(
+    SheetName="Specific Heat",
+    SheetQualifiers={"Definition": "Constant Pressure", "Behavior": ""},
+    Index=-1,
+    Variables=["Temperature"],
+    Values=[["120 [C]"]])
+matlProp6.SetData(
+    SheetName="Specific Heat",
+    SheetQualifiers={"Definition": "Constant Pressure", "Behavior": ""},
+    Index=1,
+    Variables=["Specific Heat"],
+    Values=[["800 [J kg^-1 K^-1]"]])
+matlProp6.SetData(
+    SheetName="Specific Heat",
+    SheetQualifiers={"Definition": "Constant Pressure", "Behavior": ""},
+    Index=-1,
+    Variables=["Specific Heat"],
+    Values=[["830 [J kg^-1 K^-1]"]])
+matlProp6.SetData(
+    SheetName="Specific Heat",
+    SheetQualifiers={"Definition": "Constant Pressure", "Behavior": ""},
+    Index=2,
+    Variables=["Temperature"],
+    Values=[["200 [C]"]])
+matlProp5.SetData(
+    SheetName="Thermal Conductivity",
+    SheetQualifiers={"Definition": "", "Behavior": "Isotropic"},
+    Index=-1,
+    Variables=["Temperature"],
+    Values=[["120 [C]"]])
+matlProp5.SetData(
+    SheetName="Thermal Conductivity",
+    SheetQualifiers={"Definition": "", "Behavior": "Isotropic"},
+    Index=2,
+    Variables=["Thermal Conductivity"],
+    Values=[["0.25 [W m^-1 K^-1]"]])
+matlProp11.Delete(Behavior="Isotropic")
+matlProp9.Delete(Behavior="Orthotropic")
+matlProp10.SetData(
+    SheetName="Resistivity",
+    SheetQualifiers={"Definition": "", "Behavior": "Isotropic"},
+    Index=-1,
+    Variables=["Temperature"],
+    Values=[["20 [C]"]])
+matlProp10.SetData(
+    SheetName="Resistivity",
+    SheetQualifiers={"Definition": "", "Behavior": "Isotropic"},
+    Variables=["Resistivity"],
+    Values=[["10000 [ohm m]"]])
+matlProp10.SetData(
+    SheetName="Resistivity",
+    SheetQualifiers={"Definition": "", "Behavior": "Isotropic"},
+    Variables=["Resistivity"],
+    Values=[["100000 [ohm m]"]])
+matlProp10.SetData(
+    SheetName="Resistivity",
+    SheetQualifiers={"Definition": "", "Behavior": "Isotropic"},
+    Variables=["Resistivity"],
+    Values=[["10000 [ohm m]"]])
+matlProp10.SetData(
+    SheetName="Resistivity",
+    SheetQualifiers={"Definition": "", "Behavior": "Isotropic"},
+    Index=-1,
+    Variables=["Temperature"],
+    Values=[["120 [C]"]])
+matlProp10.SetData(
+    SheetName="Resistivity",
+    SheetQualifiers={"Definition": "", "Behavior": "Isotropic"},
+    Index=1,
+    Variables=["Resistivity"],
+    Values=[["8500 [ohm m]"]])
+matlProp10.SetData(
+    SheetName="Resistivity",
+    SheetQualifiers={"Definition": "", "Behavior": "Isotropic"},
+    Index=-1,
+    Variables=["Temperature"],
+    Values=[["200 [C]"]])
+matlProp10.SetData(
+    SheetName="Resistivity",
+    SheetQualifiers={"Definition": "", "Behavior": "Isotropic"},
+    Index=2,
+    Variables=["Resistivity"],
+    Values=[["6000 [ohm m]"]])
+Save(Overwrite=True)
+engineeringDataComponent1 = system5.GetComponent(Name="Engineering Data")
+engineeringDataComponent2 = system7.GetComponent(Name="Engineering Data")
+engineeringDataComponent1.ReplaceWithShare(
+    TargetSystem=system5,
+    ComponentToShare=engineeringDataComponent2,
+    SourceSystem=system7)
+engineeringDataComponent3 = system3.GetComponent(Name="Engineering Data")
+engineeringDataComponent3.ReplaceWithShare(
+    TargetSystem=system3,
+    ComponentToShare=engineeringDataComponent2,
+    SourceSystem=system7)
+geometry1 = system5.GetContainer(ComponentName="Geometry")
+geometry1.Edit(IsSpaceClaimGeometry=True)
+Save(Overwrite=True)
+Save(Overwrite=True)
+geometry1.Exit()
+Save(Overwrite=True)
+geometry1.Edit(IsSpaceClaimGeometry=True)
+geometry1.Exit()
+Save(Overwrite=True)
+geometry1.Edit(IsSpaceClaimGeometry=True)
+geometry1.Exit()
+Save(Overwrite=True)
