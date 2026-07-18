@@ -2,7 +2,7 @@
 
 ![Project Poster Board - REGO](docs/Project%20Poster%20Board%20-%20REGO.png)
 
-![Hardware](docs/hardware.png)
+![Hardware](docs/hardware.jpg)
 
 REGO simulates autonomous, magnetic-field-driven assembly of lunar regolith particles into a hollow cylinder. The idea: on the Moon or Mars, loose paramagnetic granular material could be shaped into structural components using controlled external magnetic field gradients, with no physical contact or traditional manufacturing.
 
