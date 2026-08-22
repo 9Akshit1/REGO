@@ -63,14 +63,16 @@ _MU0_4PI = MU0 / (4.0 * PI)
 # ═══════════════════════════════════════════════════════════════════════════
 T_SETTLE_END      = 0.3        # was 0.5 — faster settle
 T_CLUSTER_END     = 2.5        # was 3.5 — clustering is fast, save 1s
-TRANSPORT_BUDGET  = 4.0        # was 6.0 — clusters transport faster with good trap
 INTERLUDE_TIME    = 0.4        # was 0.6 — early ramp means settling faster
-ARRIVAL_THRESHOLD = 0.15e-3
 HOLD_TIME         = 2.5
 SHAPE_TIME        = 20.0       # 5s per cluster (quasi-static shaping)
 CKPT_INTERVAL     = 1.0
-SIM_VERSION       = "32.0.0"
-GRAB_TIME         = 0.3
+SIM_VERSION       = "43.0.0"
+# TRANSPORT_BUDGET, ARRIVAL_THRESHOLD, GRAB_TIME (audit findings F7/F15 —
+# Stage A-2 closed-loop transport controller redesign): superseded by
+# EPS_X/EPS_V/ARRIVAL_DWELL/STALL_TIMEOUT, defined near the transport
+# controller itself (search "CLOSED-LOOP TRANSPORT CONTROLLER") so they sit
+# next to the physics that derives them. See HISTORY.md "Stage A-2".
 
 # v19: SEQUENTIAL EXTERNAL SHAPING
 #
@@ -137,8 +139,10 @@ GRAB_TIME         = 0.3
 #   Inactive clusters: weak anchor s=0.08 (prevents migration without point well).
 
 SHAPE_D_SURF               = 1.5e-3    # axial/radial offset: dipoles placed this far OUTSIDE surface
-                                       # Increased 0.9→1.5mm: reduces near-field force by (1.5/0.9)^4=7.7x
-                                       # prevents particle ejection; forces remain well within clamp
+                                       # NOTE: vestigial as of v29-v36 — caps use no active shape
+                                       # dipole (`pass`) and the wall scan dipole uses its own
+                                       # hardcoded d_wall standoff below, not this constant. Kept
+                                       # only because Section 2537/3087 printouts still reference it.
 # ── v29 STATIC EXTERNAL RING ARCHITECTURE ────────────────────────────────
 #
 # ROOT CAUSE OF ALL PREVIOUS FAILURES (v22–v28):
@@ -198,8 +202,34 @@ SHAPE_D_SURF               = 1.5e-3    # axial/radial offset: dipoles placed thi
 SHAPE_ACTIVE_PLOW_STRENGTH = 0.80      # v31: increased to ensure ring force >> hold force
 SHAPE_WAIT_HOLD_STRENGTH   = 0.15      # waiting-cluster radial support
 SHAPE_DONE_HOLD_STRENGTH   = 0.08      # already-shaped cluster retention
-SHAPE_MAX_GRAD_CLAMP       = 700.0     # T²/m clamp during shaping
+# Audit findings F6/F7: same recalibration as GRAD_B2_CLAMP above — a
+# numerical safety guard sitting above the ~50-100xW design ceiling
+# (previously 700, which the recalibrated near-field forces would have
+# saturated continuously; now a guard, not a governor).
+SHAPE_MAX_GRAD_CLAMP       = 30.0      # T²/m clamp during shaping
 SHAPE_BATCH_SIZE           = 500       # steps per batch during shape
+
+# ── G3 (2026-08-19): WALL COVERAGE-FEEDBACK SLOW WELL ──────────────────────
+# Replaces the v33 fast (~14mm/s) raster scan, which was deliberately fast
+# enough that particles could never follow the dipole (outrun-and-deposit).
+# The final pre-implementation feasibility gate (see
+# analysis/SHAPING_FEASIBILITY_GATE_2026-08-19.md) tested the wait-hold
+# dipole geometry (dipole AT the target, zero standoff, pure radial moment,
+# SHAPE_WAIT_HOLD_STRENGTH) translated slowly in azimuth against a real
+# 64-particle wall cluster: tracking error is speed-independent (dominated
+# by an intrinsic ~0.13mm radial oscillation, not lag) through 5mm/s,
+# degrades at 10mm/s, and catastrophically fails at 15mm/s (particles left
+# behind entirely — Fmag collapses ~4e-18N, min separation jumps to ~7mm).
+# This independently confirms, from direct simulation, the pre-existing
+# v_tan~14mm/s "particles cannot follow" threshold the old v33 code already
+# documented from a different (analytical) direction.
+WELL_V_TAN         = 3.0e-3    # m/s -- 1.7x margin under the clean 5mm/s ceiling,
+                                # 3.3x under the 10mm/s degradation onset, 5x under
+                                # the 15mm/s catastrophic-failure point (all measured)
+WELL_TRACK_ERR_MAX = 0.30e-3   # m -- ~2x the intrinsic oscillation envelope (0.13mm,
+                                # measured in the perturbation test); tracking-error
+                                # gate freezes the aim point above this, resumes below it
+WELL_N_Z_LEVELS    = 4         # discrete z bands swept per full theta pass
 
 # Surface confinement spring (active during shape phase only)
 # Keeps particles glued to their target surface so inter-particle repulsion
@@ -288,8 +318,18 @@ SHAPE_ORDER = [0, 3, 1, 2]     # Q0 top -> Q3 bottom -> Q1 left -> Q2 right
 # A "dipole" in the sim represents a small solenoid coil:
 #   m = N_turns * I * A_coil, so I = m / (N_turns * A_coil)
 #   P = I^2 * R_coil (resistive loss)
+# Audit finding F6: the point-dipole approximation requires evaluation
+# distance >> coil size. Old COIL_AREA=4e-6 (2mm side) was being evaluated
+# at 0.3-1.5mm standoffs — inside the coil's own near field, invalidating
+# the point-dipole formula used throughout compute_forces. Shrunk to a
+# 0.15mm-side planar microcoil (area below) so the recalibrated 0.5mm
+# standoffs (F6/F7) are a genuine >=3x far-field distance. This is an
+# explicit design choice (small local coils near the surface), not a
+# fitted parameter — the resulting coil currents are reported via the
+# existing I^2*R energy diagnostic and should be read as a design/energy
+# consequence of this choice, not tuned away.
 COIL_N_TURNS  = 100
-COIL_AREA     = 4e-6       # m^2 (4 mm^2)
+COIL_AREA     = 2.5e-8     # m^2 (0.158mm side)
 COIL_R_OHM    = 0.05       # Ohms (copper at lunar temp)
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -315,11 +355,26 @@ class C:
     chi  = 0.15;  Msat = 2e5
     kelvin_pf = Vp*chi/(2*MU0)
 
-    # v12: dt=8µs — 1.6× speedup. Soft clamp prevents force spikes.
-    dt    = 8.0e-6
+    # DMT adhesive cohesion (F11 fix). Same W_adh as phase3_consolidation.py's
+    # sulfur-wetting model, applied here as bare (unwetted) grain-grain adhesion.
+    # F_adh = 2*pi*R_star*W_adh (DMT limit, rigid stiff spheres, Derjaguin 1975).
+    # Source: W_adh=0.08 J/m^2 is the value already used for lunar regolith
+    # simulant contacts in phase3_consolidation.py — kept consistent across phases.
+    W_adh = 0.08   # J/m^2 — DMT work of adhesion
+
+    # Audit finding F8: Rayleigh criterion (dt <= 0.2*t_Rayleigh ~ 6.4us) and
+    # Hertz contact-period criterion (dt <= T_contact/20 ~ 3.8-4.5us at
+    # realistic overlaps) both require dt < 8us. dt=8us gave omega*dt=0.66 at
+    # delta=R -- unstable/inaccurate integration of the stiffest contacts.
+    dt    = 3.0e-6
     out_dt = 0.05
 
-    hcell = 1.2e-3;  hres = int(L/hcell)+1
+    # Audit finding F1: hcell=1.2mm with MAXPC=32 silently overflowed
+    # (measured 64-128 particles/cell during shaping). hcell=8R keeps the
+    # 27-cell stencil valid (hcell >= 2R) while giving cells small enough
+    # that a fixed MAXPC is enough headroom even in the densest shape-start
+    # cluster; see MAXPC below and the runtime occupancy assertion in build_grid.
+    hcell = 8.0*R;  hres = int(L/hcell)+1
     fd_h  = 3e-6
 
     qc = np.array([[7.5e-3,7.5e-3],[2.5e-3,7.5e-3],
@@ -329,11 +384,19 @@ class C:
     cR=L/6; cH=4e-3
     z_lo=cz-cH/2; z_hi=cz+cH/2
 
+    # Audit finding F3 (precursor): Q0/Q3 transport targets used to be
+    # 0.2mm off the z_hi/z_lo confinement planes (7.2mm vs z_hi=7.0mm,
+    # 2.8mm vs z_lo=3.0mm). At shaping start the surf_conf z-spring
+    # (SURF_CONF_K=0.5 N/m) then applied F_z = -0.5*0.2e-3 = 1e-4 N to every
+    # Q0 particle simultaneously -- ~70,000x gravity -- producing a violent,
+    # asymmetric downward compression the instant shaping began. Targets now
+    # equal the confinement planes exactly so shaping starts from rest with
+    # zero z-spring force.
     targets = np.array([
-        [5.0e-3, 5.0e-3, 7.2e-3],                    # Q0: top cap
+        [5.0e-3, 5.0e-3, cz + cH/2],                  # Q0: top cap (= z_hi)
         [5.0e-3-L/6-0.2e-3, 5.0e-3, 5.0e-3],         # Q1: left wall (gravity-supported lower-z)
         [5.0e-3+L/6+0.2e-3, 5.0e-3, 5.0e-3],         # Q2: right wall (gravity-supported lower-z)
-        [5.0e-3, 5.0e-3, 2.8e-3],                    # Q3: bottom cap
+        [5.0e-3, 5.0e-3, cz - cH/2],                  # Q3: bottom cap (= z_lo)
     ], dtype=np.float64)
 
     targets_3d = targets.copy()
@@ -441,13 +504,18 @@ for k in range(4):
 #   - Dipole moves along path, cluster follows. When dipole stops at target,
 #     cluster settles exactly there.
 #
-#   Validated: m=0.0006, d_lead=0.5mm:
-#     - Fz = 6916 W at cluster center (saturates v_cap cleanly) ✓
-#     - Radial Fx at 0.15mm: -2680 W (INWARD, no expansion) ✓
-#     - Q1/Q2 crosstalk: < 0.001 W per particle ✓
-#
-_m_trap  = 0.0006        # Leading dipole moment magnitude
-_d_lead  = 0.3e-3        # v13.1: reduced from 0.5mm — gentler pull, less overshoot
+#   Audit findings F6/F7 (Stage A repair): the old m=0.0006 at d_lead=0.3mm
+#   gave |B|=4.4 T from a coil declared as 100 turns x 4mm^2 at 0.3-1.5A —
+#   physically that coil produces millitesla fields, not teslas — and the
+#   point-dipole approximation was being evaluated at 0.3mm from a coil
+#   whose own linear dimension is 2mm (inside its near field). Recalibrated
+#   here to target ~50xW peak force at a standoff that is genuinely
+#   far-field for the (now smaller, see COIL_AREA) coil model:
+#     m = sqrt(target_gradB2 * r^7 / (24*K^2)), on-axis point-dipole estimate
+#     r=0.5mm, target=50xW=1.86e-8 N -> gradB2=10.6 T^2/m -> m=1.86e-5 A.m^2
+#   d_lead raised 0.3->0.5mm so it clears 3x the recalibrated coil size.
+_m_trap  = 1.856e-5      # Leading dipole moment magnitude (recalibrated, F6/F7)
+_d_lead  = 0.5e-3        # >= 3x coil linear dim (see COIL_AREA) — genuine far-field
 for idx in IDX_TRAP:
     dip_pos_np[idx] = [C.cx, C.cy, -5e-3]   # parked below domain
     dip_mom_np[idx] = [0, 0, 0]
@@ -541,6 +609,13 @@ for idx in IDX_TRAP:
 # from drifting AWAY from the wall. Natural behavior. ✓
 
 _hold_ring_R  = 2.5e-3   # Hold ring radius — reduced from 3mm for tighter z-pinning
+# _m_hold=0.005 independently checks out against the F6/F7 recalibration
+# target (~50xW at this dipole's 2.5mm operating distance predicts
+# m=5.19e-3 A.m^2, on-axis point-dipole estimate) — left unchanged.
+# NOTE: this hold-ring apparatus is only ever driven at 2 of its 4 nominal
+# positions (see v31 comment below) and is disabled entirely during "hold"
+# as of the F4 fix further down (search "false hold ring") — kept defined
+# here for index/checkpoint compatibility only.
 _m_hold       = 0.005    # Hold ring moment per dipole (4-dipole ring → net ~same as before)
 _delta_g      = 0.04e-3  # 0.04mm ring center shift along n̂ (gravity balance)
 
@@ -660,7 +735,9 @@ IDX_HOLD = IDX_HOLD_A
 #   IDX_SHAPE[12]:  Q2 scanning dipole (slots 13-15 disabled)
 #   IDX_TRAP[k]:    gravity compensator during shape
 
-_m_shape       = 0.0015    # Shape dipole moment (increased for stronger spreading vs hold)
+# Audit findings F6/F7: recalibrated the same way as _m_trap above — target
+# ~50xW peak at d_wall=0.5mm standoff (see "wall scan (d_wall=0.5mm)" row).
+_m_shape       = 1.856e-5  # Shape dipole moment (recalibrated, F6/F7)
 _m_grav_comp   = 0.0005    # Gravity compensator moment (unused during shape in v18)
 _d_grav_comp   = 2.0e-3    # Gravity compensator distance (unused during shape in v18)
 # SHAPE_WALL_SPREAD_Z: legacy constant, superseded by v18 comb rake (no oscillation)
@@ -717,11 +794,11 @@ def analyze_cross_talk():
 # ═══════════════════════════════════════════════════════════════════════════
 # TRANSPORT PATHS — PER-CLUSTER OPTIMIZED (unchanged from v3.1)
 # ═══════════════════════════════════════════════════════════════════════════
-def make_transport_path(start_xy, target_3d, n_waypoints=300,
+def make_transport_path(start_pos, target_3d, n_waypoints=300,
                         clearance=0.3e-3, other_targets=None):
     """
-    Generate a smooth transport path from the cluster's starting position on
-    the floor to its target position.
+    Generate a smooth transport path from the cluster's real starting
+    position to its target position.
 
     v5.3 CHANGES vs v5.0:
       - clearance reduced 1.0mm → 0.3mm: clusters no longer overshoot their
@@ -732,9 +809,19 @@ def make_transport_path(start_xy, target_3d, n_waypoints=300,
         the abrupt direction reversal at cruise_z that was shaking clusters.
       - Collision avoidance bump reduced from 2.0mm to 0.5mm (only applied
         when another cluster's target is directly in the lateral path).
+
+    Stage A-2 (F16): start_pos is now a real 3-D point (x,y,z), not a 2-D
+    (x,y) with z hardcoded to the floor (C.R). The floor assumption was
+    correct for the module-load-time reference paths (computed before any
+    particle exists, when the honest assumption is "starts on the floor"),
+    but wrong for the closed-loop transport controller, which rebuilds this
+    path anchored at the REAL post-clustering centroid — which sits near
+    the domain center (z≈5mm from the corner-quadrupole clustering B²
+    maximum), not the floor. Using the stale floor-at-a-spawn-corner path
+    for pure-pursuit routing made the controller chase a route that didn't
+    start where the cluster actually was — see HISTORY.md "Stage A-2".
     """
-    sx, sy = start_xy[0], start_xy[1]
-    sz = C.R
+    sx, sy, sz = start_pos[0], start_pos[1], start_pos[2]
     tx, ty, tz = target_3d
 
     # Peak z: just clearance above the destination, never below start+0.5mm
@@ -794,7 +881,7 @@ transport_paths = []
 for k in range(4):
     already_placed = [C.targets[j] for j in range(k)]
     path = make_transport_path(
-        C.qc[k], C.targets[k],
+        np.array([C.qc[k, 0], C.qc[k, 1], C.R]), C.targets[k],
         clearance=0.3e-3,
         other_targets=already_placed if already_placed else None
     )
@@ -813,6 +900,509 @@ for k in range(4):
           f"end=({p[-1,0]*1e3:.1f},{p[-1,1]*1e3:.1f},{p[-1,2]*1e3:.1f})")
 print()
 
+# Average waypoint spacing per path — used to convert a physical pure-pursuit
+# lookahead distance into a waypoint-index step (see CLOSED-LOOP TRANSPORT
+# CONTROLLER below).
+_path_avg_spacing = []
+for k in range(4):
+    _p = transport_paths[k]
+    _plen = float(np.sum(np.linalg.norm(np.diff(_p, axis=0), axis=1)))
+    _path_avg_spacing.append(_plen / max(1, len(_p) - 1))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CLOSED-LOOP TRANSPORT CONTROLLER (Stage A-2, audit findings F7/F15)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# ROOT CAUSE OF THE REGRESSION THIS REPLACES:
+#   Stage A removed the hard velocity cap (F7) because it was a non-physical
+#   numerical crutch, not a real constraint. But the transport control law
+#   (previously: dipole position/strength as a pure function of ELAPSED TIME
+#   via get_transport_progress(t), with zero velocity feedback and completion
+#   by a 4.0s timeout regardless of actual state) has no other mechanism that
+#   opposes velocity. Reconstructing a full run against the real VTU output
+#   (analysis/reconstruct_run.py) showed every one of the four transports ran
+#   at the clamp-saturated force ceiling (141.7xW, a=229.6 m/s^2) for large
+#   fractions of its window with nothing to arrest the resulting velocity,
+#   that arrived_t was None at every checkpoint sampled (no transport ever
+#   detected genuine arrival), and that velocities reached 50,000-97,000 mm/s
+#   by the last transport. See HISTORY.md "Stage A-2" for the full derivation.
+#
+# THE FIX — closed-loop position+velocity feedback, NOT a reinstated cap:
+#   A static dipole field is conservative (energy-conserving); a particle
+#   released into it with nonzero KE cannot come to rest on its own — it must
+#   oscillate forever absent dissipation. The only physically available
+#   dissipation here is real inelastic contact (weak against bulk
+#   center-of-mass motion) and ACTIVELY MOVING THE SOURCE, which does real
+#   work on the particle because the field becomes genuinely time-varying —
+#   exactly how every real closed-loop electromagnet (maglev, magnetic
+#   bearings, real magnetic-tweezer rigs) is actually driven: a controller
+#   reads a position/velocity sensor and adjusts the ACTUATOR's current and
+#   position; the force the particle feels remains the same physical law,
+#   F=(Vp*chi_eff/2mu0)*grad(B^2), evaluated at wherever the controller
+#   chose to put the real dipole. No force is ever added to a particle's
+#   equation of motion; nothing is filtered by cluster_id; nothing clips
+#   vel[i]. Only the dipole's own position/moment/strength (dip_p/dip_m/
+#   dip_s) — already the thing update_dipoles has always controlled —
+#   becomes a function of REAL sensed velocity as well as position and time.
+#
+# STATE MACHINE (per actively-transporting cluster): liftoff -> lift ->
+#   cruise -> brake -> settle -> verify (dwell) -> hold. One-directional (no
+#   reverting to an earlier zone within one transport attempt, avoiding
+#   chattering); the only escape hatch is the stall safety net
+#   (STALL_TIMEOUT), a diagnostic fallback that logs loudly if triggered,
+#   not a normal path.
+#
+# Stage A-3 (finding F17): a real post-Stage-A-2 run showed all four
+# transports stall without converging. Reconstruction against real VTU
+# trajectory data (not code-reading) found the actual cause: clustering only
+# regroups particles laterally at floor level (z stays pinned at C.R the
+# whole time) — it never lifts them — so every transport genuinely starts
+# needing a ~mm-scale vertical climb against gravity that the old CRUISE law
+# never accounted for. Because the cluster couldn't climb, the pure-pursuit
+# lookahead point (which assumed the cluster was following the path) ran
+# away from the cluster's real position — measured directly: dipole-cluster
+# separation grew 0.79mm -> 2.86mm -> 5.00mm over ~2.3s — collapsing the
+# achievable force exactly when more was needed. See HISTORY.md "Stage A-3"
+# for the full reconstruction, the real per-particle lift-off force table
+# (verified against the real 64-particle cluster geometry, not a point-mass
+# approximation), and the quantitative justification for every constant
+# below.
+#
+# Stage A-4 (finding F18): implementing Stage A-3 exposed a second, distinct
+# failure — LIFTOFF/LIFT genuinely worked (real z rose 0.03->0.72mm), but the
+# instant CRUISE engaged, the cluster fell straight back to the floor within
+# 50ms and never recovered. Fine-grained (6ms, real-control-period)
+# instrumentation of real per-cluster state (DEBUG_LIFT_CRUISE=1,
+# _debug_lift_cruise_snapshot()) traced the exact mechanism: CRUISE used ONE
+# pull direction (path tangent) and ONE scalar throttle — a function of
+# TOTAL speed — to do two independent jobs (vertical support, horizontal
+# pursuit) at once. Free-fall increases total speed, so that throttle
+# suppressed the very force needed to stop the fall: measured directly,
+# thr_total pinned at exactly 0.0 for 10+ consecutive control steps once
+# vr_tot exceeded 1 (a positive-feedback collapse, not a momentary gap —
+# vr_tot climbed 1.33->1.43->2.30->3.39->4.54->4.93->6.12 as the fall itself
+# kept adding speed). See HISTORY.md "Stage A-4" for the full trace and the
+# design derivation (including the proof that a single on-axis dipole is
+# physically sufficient for both jobs at once, with an 11x margin).
+#
+# LIFTOFF / LIFT: dipole tracks directly above the real-time lateral
+#   centroid at a fixed 0.5mm standoff (the same safe, non-singular,
+#   zero-clamp-saturation standoff used everywhere else in this controller),
+#   moment pointing straight down (attractive, pulling up). Strength comes
+#   from a one-step-ahead (deadbeat) predictor using the real known control
+#   period (CTRL_DT_NOMINAL): a_vert_gross = g + max(0, (V_CEIL-v_z)/
+#   CTRL_DT_NOMINAL) — proven (numerically) to deliver Fz/Mg >= 1.0 always
+#   while active and to reach V_CEIL in exactly one control step with no
+#   overshoot, replacing the old ramp+smoothstep-throttle law that let a
+#   single 6ms step overshoot V_CEIL by 30-60% before the throttle reacted
+#   (a real, if self-correcting — because it depends on v_z alone — bang-bang
+#   oscillation; fixed here rather than ignored). LIFTOFF is verified
+#   complete (not assumed) once the real z position has risen by a full
+#   particle radius (Z_LIFTOFF_CONFIRM); LIFT continues the same law until
+#   real floor clearance reaches LIFT_CLEARANCE, sustained for LIFT_DWELL. A
+#   LIFTOFF_STALL_TIMEOUT diagnostic warns (does not silently proceed) if
+#   real upward motion is never confirmed.
+#
+# CRUISE: two independent channels — vertical (identical deadbeat law to
+#   LIFT, fed by v_z only) and horizontal (identical predictive form, fed by
+#   HORIZONTAL speed only — never v_z, so free-fall cannot suppress it and it
+#   cannot suppress vertical support) — composed into one 3-D acceleration
+#   vector and realized by a SINGLE dipole at the fixed standoff _d_lead
+#   (0.5mm, same as LIFT/BRAKE/SETTLE — not path-derived, so F17's
+#   separation-runaway mechanism cannot recur: there is no longer a variable
+#   separation to run away). Horizontal direction is the real pure-pursuit
+#   lookahead point (nearest waypoint + lookahead on the existing, unchanged
+#   collision-avoiding path arc — make_transport_path and its live
+#   re-anchoring at the real position, F16, are unchanged), projected to the
+#   horizontal plane. Because the vector is composed BEFORE realization, the
+#   delivered vertical force component equals a_vert_gross exactly — not
+#   degraded by whatever the horizontal channel needs.
+#
+# BRAKE (triggered at d <= D_BRAKE_TRIGGER): the dipole is placed BEHIND the
+#   cluster along its actual (real, sensed) velocity direction, so the same
+#   always-attractive paramagnetic force now opposes motion. The required
+#   deceleration is the standard kinematic braking relation
+#   a_needed = v^2 / (2*d_remaining), capped at what's actually achievable
+#   at the safe (non-singular) brake standoff R_DECEL0 — see
+#   solve_strength_for_accel().
+#
+# SETTLE/HOLD: dipole parked at target + small normal offset (not coincident
+#   with the particles' own location — avoids the singular near-field right
+#   where they sit), at a strength with modest headroom over the local
+#   gravity component. Arrival is declared only once |x-target|<EPS_X AND
+#   |v|<EPS_V simultaneously, sustained for ARRIVAL_DWELL — a real physical
+#   criterion, not a timer.
+#
+# TOLERANCES DERIVED FROM SIMULATION SCALE (not chosen for convenience):
+#   EPS_X = 5*R: sub-particle-radius position precision is meaningless.
+#     (This independently reproduces the pre-existing ARRIVAL_THRESHOLD
+#     value of 0.15mm exactly — a good sign that constant was reasonable
+#     even though the logic that used it wasn't.)
+#   EPS_V = EPS_X / CTRL_DT_NOMINAL: the speed below which a cluster cannot
+#     drift outside the position tolerance even coasting UNPOWERED for one
+#     full control cycle. (The a_max-derived bound -- the speed from which
+#     the field could still stop within EPS_X, ~262mm/s -- is a much looser
+#     sanity ceiling, not used as the arrival threshold itself, since it
+#     would call a cluster "arrived" while still visibly moving.)
+#
+CTRL_DT_NOMINAL  = 6.0e-3        # matches existing BATCH_TRANSPORT(2000)*dt(3us)
+EPS_X            = 5.0 * C.R     # position tolerance = 5 particle radii = 0.150mm
+EPS_V            = EPS_X / CTRL_DT_NOMINAL   # velocity tolerance, ballistic-drift-derived
+D_BRAKE_TRIGGER  = 3.0 * EPS_X   # brake-zone entry, generous margin over the physically
+                                  # required stopping distance at V_CEIL (~0.14um, see below)
+# F21: hysteresis exit threshold. Real per-control-step data showed a
+# genuine, worsening CRUISE/BRAKE limit cycle: with a single no-hysteresis
+# threshold, the instant d ticks back above D_BRAKE_TRIGGER after a real
+# near-field clamp-saturation kick (satfrac=1.07 observed; v_z jumped
+# 3.5->17.4->74.8mm/s across two 6ms steps right at a zone crossing),
+# CRUISE reasserts a full-authority ceiling-tracking command from scratch,
+# which can trigger another kick — real excursions reached d=0.61-2.91mm
+# before flipping back, with the run-length between flips shrinking over
+# time (158->106->41->21->...->1 steps). Once in BRAKE, only return to
+# CRUISE once d exceeds this WIDER exit threshold (a round 2x multiplicative
+# margin over D_BRAKE_TRIGGER, matching this codebase's existing convention
+# of round multiplicative margins elsewhere — with headroom over the
+# observed 0.88mm first-chatter excursion, the case hysteresis specifically
+# needs to suppress, vs. larger genuine kicks which should still legitimately
+# re-trigger CRUISE).
+D_BRAKE_EXIT     = 2.0 * D_BRAKE_TRIGGER
+# F21 rate limiter: bounds how fast the commanded aim direction (a_hat) can
+# rotate per control step, derived from real geometry (not an arbitrary
+# constant): the dipole sits at FIXED standoff r=0.5mm from the centroid
+# regardless of commanded strength (only orientation varies with a_hat), so
+# a rotating a_hat sweeps the dipole's real position along an arc of radius
+# r. Real cluster max particle-to-centroid extent, measured directly from
+# VTU data (cluster 1, both its clean pre-oscillation CRUISE window and
+# during the actual saturation crisis: consistently 0.256-0.270mm — a
+# stable, intrinsic property of the 64-particle cluster, not something the
+# oscillation itself caused): Rc=0.26mm. Worst-case real separation if a
+# particle sits exactly on the aim axis: r-Rc=0.24mm (independently
+# confirmed via _raw_gradB2_onaxis: at that separation, raw grad/clamp~81 —
+# this cluster/standoff combination has little inherent margin). Allow the
+# per-step swept arc to consume at most HALF that margin (>=2 consecutive
+# worst-case-direction steps needed to fully close the gap, giving the
+# control loop a chance to react — a round fractional margin matching this
+# codebase's existing convention elsewhere): ell_max=0.5*0.24mm=0.12mm.
+# Chord-to-angle: dtheta_max = 2*asin(ell_max/2r) = 0.2406 rad = 13.8 deg
+# per 6ms control step (~40 rad/s angular slew rate).
+DTHETA_MAX       = 0.2406
+V_CEIL           = 8.0e-3        # m/s — cruise speed ceiling (design choice; stopping
+                                  # distance at this speed is sub-micron, see HISTORY.md)
+
+# F23 (2026-08-18): CRUISE's reference velocity was a discontinuous step function
+# (v_ref = +-V_CEIL right up until the position error crossed zero, then an instant full-
+# magnitude sign flip) -- diagnosed as the root cause behind the F21/F22 near-field chatter
+# (F19-F22, HISTORY.md): no realization strategy downstream can cleanly execute a genuinely
+# discontinuous command. Fix: taper the reference speed continuously with distance instead
+# ("glideslope"), using the same kinematic relation BRAKE's own a_needed law already uses
+# (v^2=2*a*d), so v_ref -> 0 continuously as the position error -> 0 (magnitude is what
+# matters at the sign-flip point, not the sign itself once magnitude is negligible).
+# CAPTURE_RADIUS reuses the EXISTING D_BRAKE_EXIT constant rather than inventing a new
+# distance parameter; A_GLIDE is then the deceleration that brings a cluster moving at
+# V_CEIL to rest exactly at d=CAPTURE_RADIUS if held constant (~6500x below a_max=229.6m/s^2
+# -- a deliberately gentle design SHAPE for the reference, not a new force-authority limit;
+# full deadbeat correction authority against real disturbance is untouched). Margin check:
+# half the nearest real target separation (2.738mm/2=1.369mm) is 1.52x CAPTURE_RADIUS, so the
+# glide zone does not reach into a neighboring target's territory. Far from target (d >> 0.9mm)
+# this reduces to the old V_CEIL ceiling exactly -- validated ~1.2-1.6s transit times unchanged.
+CAPTURE_RADIUS   = D_BRAKE_EXIT                        # 0.90mm, reused not invented
+A_GLIDE          = (V_CEIL ** 2) / (2.0 * CAPTURE_RADIUS)   # ~0.0356 m/s^2
+
+def _v_glide_mag(d):
+    """F23: continuous distance-scaled speed cap, ceiling-matched far away, -> 0 at d=0."""
+    return min(V_CEIL, math.sqrt(max(0.0, 2.0 * A_GLIDE * d)))
+
+ARRIVAL_DWELL    = 0.15          # s — sustained-criterion dwell before declaring arrival
+STALL_TIMEOUT    = 6.0           # s — diagnostic safety net only, ~4x the expected
+                                  # 1.2-1.6s transit time; firing logs a loud warning
+                                  # (2026-08-17: temporarily raised to 20.0 for an
+                                  # extended-timeout experiment; reverted after that
+                                  # run showed a persistent, non-decaying limit cycle
+                                  # rather than slow convergence — see HISTORY.md)
+R_DECEL0         = _d_lead       # brake-phase standoff — reuse the same safe, non-singular
+                                  # far-field distance already validated for cruise (F6)
+D_HOLD           = _d_lead       # settle/hold standoff — same reasoning
+PURSUIT_LOOKAHEAD = _d_lead      # pure-pursuit lookahead distance along the path arc
+
+# F24 (2026-08-18): BRAKE's law replaced. The prior law (a_needed = v^2/(2*d),
+# an exact kinematic stopping-distance inversion recomputed fresh every 6ms)
+# is a deadbeat/exact-match law with no damping margin -- it assumes
+# continuous re-evaluation lands v=0 exactly at d_remaining, which only holds
+# in continuous time. At CTRL_DT_NOMINAL=6ms sampling, combined with the F21
+# rate limiter and the zero-clamp realization (a_cmd_mag=max(0,dot(F,a_hat)),
+# which zeros thrust outright during a >90 deg direction swing), a velocity
+# reversal at BRAKE re-entry (exactly what a prior overshoot produces)
+# reliably clips thrust to zero for a step or more, degrading the "exact"
+# stopping estimate and letting the cluster coast past the target -- reopening
+# d beyond D_BRAKE_EXIT, handing back to CRUISE, which reaccelerates, and
+# repeats. This is a persistent, non-decaying limit cycle (see extended-
+# STALL_TIMEOUT experiment, HISTORY.md), not a slow-convergence/timeout issue.
+#
+# Fix: replace the magnitude law with a critically-damped second-order
+# state-feedback (PD/spring-damper) law, a_net = -2*zeta*omega_n*v +
+# omega_n^2*(target-x). Unlike the deadbeat law this commands a SMALL,
+# smoothly-varying acceleration whenever both e and v are small -- it never
+# needs a large sudden direction reversal near the target, which removes the
+# zero-clamp dead-zone mechanism above at its root rather than patching
+# around it (c.f. the F22 raised-cosine attempt, which patched the
+# realization layer and made things worse; this changes what's being
+# realized instead).
+#
+# omega_n chosen from two independent physical margins, not tuned to a
+# target trajectory:
+#   (1) discretization stability: standard guidance keeps omega_n*dt <~0.2
+#       for a stable discrete critically-damped response. dt=CTRL_DT_NOMINAL
+#       =6ms is fixed by the existing BATCH_TRANSPORT cadence, so
+#       omega_n <~ 33 rad/s.
+#   (2) force margin: even at the worst incoming speed observed in real F23
+#       data (~280mm/s), the damping term 2*zeta*omega_n*v must stay far
+#       below a_max=229.6 m/s^2 (the clamp-saturated ceiling at R_DECEL0).
+# Synthetic sweep (test_f24_pd_brake.py, 8 scenarios spanning both approach
+# directions, overshoot/reapproach, high/low/noisy incoming velocity, and a
+# realistic post-F23 spike state) over omega_n in {15,20,25,30,33}: omega_n=30
+# (omega_n*dt=0.18) is the sweep optimum -- every scenario converges, chatter
+# (BRAKE<->CRUISE re-entries) on the worst case drops from 4 (old law) to 2,
+# settle time drops from 1.21s to 0.33s, peak commanded accel 14.8m/s^2
+# (>15x margin below a_max). omega_n=33 (ratio 0.198) begins showing
+# discretization artifacts (final-position-error blowup on several
+# scenarios) -- 30 is the largest value with no instability signature.
+# zeta=1 (critically damped: fastest non-oscillatory linear response) is a
+# standard control-theory default, not a free tuning knob; matches the same
+# category of gain (Kp/Kv-style PD) reported for closed-loop electromagnetic
+# microrobot steering in the literature (Tandfonline, "Electromagnetic
+# Steering of a Magnetic Cylindrical Microrobot Using Optical Feedback
+# Closed-Loop Control") and LQR-tuned PID maglev trajectory tracking
+# (ScienceDirect) -- sliding-mode/disturbance-observer/fuzzy-PID approaches
+# from that same literature were not used because those exist to handle
+# unmodeled disturbance or model uncertainty, neither of which is present
+# here (the field model is exact; the only non-ideality is the fixed 6ms
+# ZOH discretization already accounted for in (1) above).
+BRAKE_ZETA       = 1.0
+BRAKE_OMEGA_N    = 30.0          # rad/s — see derivation above
+
+def _brake_accel_pd(e_vec, v_cur):
+    """F24: desired NET (total, physical) acceleration via a critically-damped
+    spring-damper toward the target. This is a_desired in the same sense the
+    old a_net_req was -- the caller still adds (0,0,g) separately to get the
+    DIPOLE's required contribution, since integrate() applies gravity
+    unconditionally every step regardless of dipole action (same convention
+    as CRUISE and the pre-F24 BRAKE law; unchanged here)."""
+    return -2.0 * BRAKE_ZETA * BRAKE_OMEGA_N * v_cur + (BRAKE_OMEGA_N ** 2) * e_vec
+
+_K_ONAXIS = MU0 / (4.0 * PI)
+
+def _raw_gradB2_onaxis(s, r):
+    """On-axis |d(B^2)/dr| for a point dipole of moment s*_m_trap at distance r
+    from the evaluation point -- the same closed-form estimate used throughout
+    the Stage A audit's force-vs-standoff tables. This is a design-time estimate
+    for CHOOSING a control input, not a substitute for the real simulation
+    physics: the actual force applied to every particle still comes only from
+    the real, unmodified B_and_gradB2/compute_forces kernels (full 3-D
+    geometry, chi saturation, the real per-particle position)."""
+    return 24.0 * _K_ONAXIS**2 * (s * _m_trap)**2 / max(r, 1e-9)**7
+
+def _clamped_gradB2(raw, clamp):
+    return raw * clamp / math.sqrt(raw*raw + clamp*clamp) if raw > 0.0 else 0.0
+
+def _accel_at(s, r, clamp):
+    """Achievable acceleration (design estimate) at strength s, standoff r."""
+    clamped = _clamped_gradB2(_raw_gradB2_onaxis(s, r), clamp)
+    return (C.kelvin_pf * clamped) / C.mp
+
+_A_R_DECEL0_MAX = _accel_at(1.0, R_DECEL0, 30.0)   # achievable ceiling at the safe brake standoff
+
+def _rate_limit_hat(a_hat_prev, a_hat_raw, dtheta_max=DTHETA_MAX):
+    """F21: cap the per-control-step rotation of the commanded aim direction
+    at dtheta_max (see DTHETA_MAX derivation above). Real per-control-step
+    data showed the un-limited CRUISE/BRAKE laws could reverse the aim
+    direction (hence the dipole's real position, at fixed 0.5mm standoff)
+    by 180 degrees in a single 6ms step, sweeping close enough to a
+    finite-size cluster's edge particles to spike the real near-field
+    gradient (observed satfrac up to 13.8x clamp) and kick velocity hard —
+    a self-sustaining resonance (transport_1 real data: v_z jumped
+    3.5->17.4->74.8mm/s across two steps). Uses a Gram-Schmidt
+    construction (NOT the textbook slerp coefficient formula, which is
+    singular both near 0 and near 180 degrees — exactly the regime this
+    must handle correctly, caught by synthetic testing before reaching the
+    real controller) so it stays numerically stable at any angle."""
+    if a_hat_prev is None:
+        return a_hat_raw
+    u = a_hat_prev
+    cos_ang = min(1.0, max(-1.0, float(np.dot(u, a_hat_raw))))
+    ang = math.acos(cos_ang)
+    if ang <= dtheta_max:
+        return a_hat_raw
+    perp = a_hat_raw - cos_ang * u
+    perp_norm = np.linalg.norm(perp)
+    if perp_norm < 1e-6:
+        # Near-exactly-antipodal: rotation plane is genuinely undefined —
+        # pick an arbitrary perpendicular (real continuous dynamics almost
+        # never hold an exact 180-degree tie for multiple consecutive
+        # steps, so this is a rare, one-off tiebreak, not a systematic bias).
+        arbitrary = np.array([1.0, 0.0, 0.0]) if abs(u[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+        perp = arbitrary - np.dot(arbitrary, u) * u
+        perp_norm = np.linalg.norm(perp)
+    w = perp / perp_norm
+    result = math.cos(dtheta_max) * u + math.sin(dtheta_max) * w
+    n = np.linalg.norm(result)
+    return result / n if n > 1e-12 else a_hat_raw
+
+def _realize_command_mag(a_cmd, a_cmd_mag_raw, a_hat_raw, a_hat):
+    """NOT CALLED — F22 fix designed, implemented, and REVERTED (2026-08-18) after the real
+    Gate 2 transport_0 run showed it made closed-loop performance measurably WORSE than the
+    original F21 clamp (peak velocity excursion 279mm/s vs 226mm/s pre-fix; final STALL
+    d=2.307mm v=52.6mm/s vs 0.867mm/8.7mm/s pre-fix; BRAKE zone essentially never re-entered
+    after the first ~2s). Left in place, unused, for documentation — see HISTORY.md "F22 fix:
+    designed, implemented, REVERTED" for the full real-data comparison and the honest
+    reassessment of why a purely-local realization-weighting change could not fix this (the
+    raised-cosine weighting, unlike the original clamp, injects real force with a component
+    ANTI-aligned with the true required correction for most of the 90-150deg band, which turned
+    out to matter more in the real coupled 3D/multi-particle dynamics than the free-fall gaps it
+    eliminated — a distinction the cheap synthetic tests, run on an admittedly-simplified
+    point-mass model, could not surface). The original design rationale is preserved below
+    exactly as written before implementation, since the reasoning itself is not wrong, only
+    incomplete — it did not anticipate that "smoothly reduced but real" force in a
+    still-badly-misaligned direction (theta up to ~150deg) could destabilize the real system
+    more than the zero-force gaps it was replacing.
+
+    ORIGINAL DESIGN RATIONALE (2026-08-17), UNCHANGED: the direction rate limiter above (F21)
+    -- this only replaces how much of the raw commanded MAGNITUDE gets realized
+    once the direction is capped. The original realization used a plain linear
+    projection clamped at zero: a_cmd_mag = max(0, dot(a_cmd, a_hat)). Real
+    per-control-step data (DEBUG_LIFT_CRUISE capture, see HISTORY.md "F22
+    diagnostic") showed this collapses to EXACTLY ZERO commanded force for
+    every step where the raw desired direction is >90 degrees from the
+    previous realized direction (dtheta_wanted>90deg) -- not reduced, zero --
+    for as many as 7 consecutive 6ms steps (up to 42ms) until the DTHETA_MAX
+    rotation cap works its way back under 90 degrees. Because gravity is
+    applied unconditionally every step regardless of dipole state, a zero
+    command is a real free-fall window, not a conservative no-op: 19 such
+    episodes were observed in a 2.5s real replay, and three of them
+    compounding within 60ms produced the 226mm/s excursion at t~4.75s that
+    triggered this fix (see HISTORY.md).
+
+    Replaces the clamp with a raised-cosine (half-angle) weighting:
+        weight = 0.5*(1 + cos(theta)) = cos^2(theta/2)   in [0, 1]
+    where theta is the angle between the raw desired direction and the
+    (unchanged, still rate-limited) realized direction a_hat. This is the
+    smallest change that satisfies every constraint identified during
+    diagnosis:
+      - weight(0)=1: fully-aligned commands are realized exactly as before
+        (no change to the validated common-case behavior).
+      - weight(90deg)=0.5, not 0: this is the actual bug fix -- authority is
+        reduced, not annihilated, right where the old clamp went flat.
+      - weight(180deg)=0, and ONLY at that single exact-antipodal point:
+        pushing along a_hat when it is EXACTLY opposite the true desired
+        direction cannot possibly help (any positive force there strictly
+        increases the vector error), so zero is the one point where zero is
+        actually correct -- the raised-cosine reproduces that, it doesn't
+        eliminate it, it just stops the old clamp's zero from being flat
+        across the ENTIRE 90-180 degree band.
+      - continuous (in fact C-infinity) in theta, so there's no new
+        discontinuity introduced at the old 90-degree clamp boundary.
+      - weight in [0,1] always -> a_cmd_mag = weight*a_cmd_mag_raw can never
+        exceed the raw commanded magnitude, so the existing physical
+        ceiling (downstream solve_strength_for_accel's s<=1 clamp on the
+        real field) is preserved exactly as before -- nothing here can ask
+        for more force than the un-rate-limited controller already could.
+      - direction is always exactly a_hat (a nonnegative scalar times a
+        rate-limited unit vector) -- the delivered force can never point
+        anywhere other than where the unchanged direction limiter already
+        allows, so it can never reverse the intended direction.
+
+    Rejected alternatives (see HISTORY.md "F22 fix design" for the full
+    derivation): abs(dot(...)) was rejected because it delivers FULL raw
+    magnitude at theta=180 -- the single worst-aligned case -- reintroducing
+    the "large push in a bad direction" instability the original projection
+    was added to prevent (F21 design, case B). A constant additive floor was
+    rejected as an invented, undocumented parameter with no physical
+    derivation, discontinuous at the point it takes over, and non-vanishing
+    at the true antipodal worst case.
+
+    Verified via synthetic unit tests before implementation: weight(90)=0.5000,
+    weight(120)=0.2500, weight(150)=0.0670, weight(180)=0.0000 (closed form,
+    matches by construction); continuity jump across 90deg < 2e-6; direction
+    rate limit itself unaffected; all 13 sampled real captured zero-force
+    episodes (dtheta_wanted 106.6-177.1deg) re-score to a strictly positive,
+    ceiling-respecting magnitude under this formula.
+    """
+    cos_th = min(1.0, max(-1.0, float(np.dot(a_hat_raw, a_hat))))
+    weight = 0.5 * (1.0 + cos_th)
+    return weight * a_cmd_mag_raw
+
+def solve_strength_for_accel(a_needed, r, clamp=None):
+    """Invert the soft-clamped on-axis force law: find the dipole strength s in
+    [0,1] that delivers a_needed at standoff r. a_needed is first capped at what's
+    actually achievable at (r, s=1) -- the field is strongest very close to the
+    dipole, so the theoretical clamp-saturated ceiling a_max is only reachable
+    much closer than the safe, non-singular standoffs used here; capping at the
+    real (r, s=1) ceiling keeps this consistent rather than solving for an
+    impossible s>1."""
+    c = GRAD_B2_CLAMP[None] if clamp is None else clamp
+    a_ceiling = _accel_at(1.0, r, c)
+    a = min(max(a_needed, 0.0), a_ceiling)
+    if a <= 0.0 or a_ceiling <= 0.0:
+        return 0.0
+    F_needed = a * C.mp
+    clamped_needed = min(F_needed / C.kelvin_pf, 0.999 * c)
+    raw_needed = clamped_needed * c / math.sqrt(max(c*c - clamped_needed*clamped_needed, 1e-30))
+    raw_at_s1 = _raw_gradB2_onaxis(1.0, r)
+    s = math.sqrt(max(raw_needed / max(raw_at_s1, 1e-300), 0.0))
+    return min(max(s, 0.0), 1.0)
+
+
+# ── Stage A-3 (F17 fix) / Stage A-4 (F18 fix): LIFTOFF/LIFT/CRUISE constants ─
+# Every number below is derived and checked against the real 64-particle
+# cluster geometry and the real force law, not assumed. See HISTORY.md
+# "Stage A-3" and "Stage A-4" for the full derivations; summary:
+#
+#   Real per-particle lift force (64 real particles from an actual VTU
+#   frame, dipole directly above centroid, moment down):
+#     r=0.10mm: 37.6xW,  56-64/64 particles clamp-saturated (the unstable
+#               near-field regime this design has avoided everywhere else)
+#     r=0.50mm: 30.4xW,  0/64 saturated   <- chosen operating standoff
+#     r=0.75mm:  2.3xW,  0/64 saturated
+#     r=1.00mm:  0.34xW (CANNOT lift)
+#   Lateral force at r=0.5mm is 0.051% of the vertical force and the
+#   implied angular acceleration from net torque is ~0 (both computed from
+#   the real, asymmetric 64-particle positions) — confirms the point-mass
+#   approximation is fine for CHOOSING a control input even though the
+#   cluster's physical extent (RMS radius 0.166mm) is not negligible next
+#   to the 0.5mm standoff; lift is clean, not lopsided.
+#
+#   Stage A-4 (F18): LIFT's and CRUISE's vertical channel both use a one-
+#   step-ahead (deadbeat) predictor, a_vert_gross = g + max(0, (V_CEIL-v_z)
+#   / CTRL_DT_NOMINAL) — proven (numerically, not assumed) to deliver
+#   Fz/Mg >= 1.0 always while active (1.82x at v_z=0, exactly 1.00x at/above
+#   V_CEIL, never below) and to reach V_CEIL in exactly one control step
+#   with no overshoot, replacing the old ramp+smoothstep-throttle law that
+#   let a single 6ms step overshoot V_CEIL by 30-60% (measured directly:
+#   v_z spiking to 10-13mm/s) before the throttle reacted. CRUISE's
+#   horizontal channel uses the identical predictive form fed by HORIZONTAL
+#   speed only (never v_z), so free-fall cannot suppress it — this is the
+#   actual F18 fix, breaking the old total-speed throttle's positive-
+#   feedback collapse (measured: thr_total pinned at exactly 0.0 for 10+
+#   consecutive control steps once vr_tot exceeded 1, because free-fall
+#   itself kept increasing total speed). Both channels are composed into
+#   one 3-D acceleration vector and realized by a SINGLE dipole at the
+#   fixed standoff _d_lead=0.5mm (not path-derived — the F17 separation-
+#   runaway mechanism cannot recur because there is no longer a variable
+#   separation to run away), proven sufficient: 30.4x cluster weight is
+#   available there, an 11.1x margin over the largest combined target used
+#   (6.87 m/s^2 for two independent 3x-gravity channels).
+Z_LIFTOFF_CONFIRM   = C.R          # net real upward rise required to confirm genuine
+                                    # motion (one full particle radius — unambiguous,
+                                    # not floor jitter), checked from real position, not
+                                    # assumed from the commanded strength
+LIFT_CLEARANCE      = _d_lead      # 0.5mm — reuses the same safe standoff constant
+                                    # used everywhere else in this controller
+LIFT_DWELL          = 0.05         # s — short dwell confirming clearance is sustained,
+                                    # not a single noisy sample
+LIFTOFF_STALL_TIMEOUT = 1.0        # s — diagnostic only: real expected time is
+                                    # ~150-330ms; firing means real upward motion was
+                                    # never confirmed and is logged loudly, not hidden
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # TAICHI FIELDS
@@ -822,22 +1412,55 @@ vel  = ti.Vector.field(3, ti.f64, shape=C.N)
 frc  = ti.Vector.field(3, ti.f64, shape=C.N)
 fmag = ti.Vector.field(3, ti.f64, shape=C.N)
 
-HRES = C.hres; MAXPC = 32
+# Audit finding F1: MAXPC=32 with the old hcell=1.2mm silently overflowed
+# (measured 64-128 particles/cell during shaping) because build_grid wrote
+# the true count into grid_cnt while only storing the first 32 indices, and
+# compute_forces then looped over the (wrong, too-large) count, reading past
+# the end of grid_buf. With hcell=8R (smaller cells) a single fully-compacted
+# 64-particle cluster can still land in one cell, so MAXPC must cover the
+# whole cluster; grid_overflow_count below turns any future overflow into a
+# visible, counted event instead of silent data corruption.
+HRES = C.hres; MAXPC = 96
 grid_cnt = ti.field(ti.i32, shape=(HRES, HRES, HRES))
 grid_buf = ti.field(ti.i32, shape=(HRES, HRES, HRES, MAXPC))
+grid_overflow_count = ti.field(ti.i32, shape=())
 
 cluster_id  = ti.field(ti.i32, shape=C.N)
 fixed_color = ti.field(ti.i32, shape=C.N)
 ncontact    = ti.field(ti.i32, shape=C.N)
 qc_ti       = ti.Vector.field(2, ti.f64, shape=4)
 assign_centres = ti.Vector.field(3, ti.f64, shape=4)
-v_cap             = ti.field(ti.f64, shape=())
 surf_conf_enabled = ti.field(ti.i32, shape=())   # 1 = surface confinement active (shape phase)
 
-# ── Gradient clamp — TIGHTENED to prevent force spikes ────────────────
-# With 3mm dipole separations, max ∇B² within particle cloud should be
-# ~50-500 T²/m. Clamp at 5000 for safety margin.
-GRAD_B2_CLAMP = 2000.0             # default for transport/cluster
+# ── Gradient clamp — NUMERICAL SAFETY GUARD ONLY (audit findings F6/F7) ──
+# Previously GRAD_B2_CLAMP=2000 T²/m combined with a hard velocity cap
+# (removed — see integrate()) to make ~9,000×W forces and ~10× per-step
+# v_cap overshoot invisible: the sim "looked" stable because clipping, not
+# physics, set the kinematics. With dipole moments recalibrated (below) to
+# a physically-targeted ~10-100×W peak force at realistic standoffs, this
+# clamp should NOT saturate during normal operation — it exists only to
+# bound the true 1/r^4 divergence if a particle numerically coincides with
+# a dipole position. 30 T²/m corresponds to ~140×W, comfortably above the
+# ~100×W design ceiling; the validation script checks it is not saturated.
+#
+# Audit finding F14 (found while implementing F6/F7): this used to be a
+# plain Python float, reassigned per-phase inside update_dipoles() via
+# `global GRAD_B2_CLAMP`. Taichi bakes Python-scope scalars referenced
+# inside a @ti.func/@ti.kernel into the compiled kernel AT ITS FIRST
+# COMPILE — later Python-side reassignment has no effect on already-JIT'd
+# code (verified empirically: a minimal repro kernel returns its
+# first-seen value even after the Python global is changed and the kernel
+# is called again). compute_forces (which inlines B_and_gradB2, which
+# reads this value) is first compiled during the pre-loop diagnostic call
+# while pm.state=="settle" — so in EVERY prior version of this file,
+# whatever the settle/cluster branch set (2000.0) was silently the
+# permanent clamp for the entire run, including "shape" phase; the
+# documented SHAPE_MAX_GRAD_CLAMP=700 (and now =30) was never actually
+# applied at runtime. Fixed by making this a ti.field, exactly like
+# surf_conf_enabled just above and v_cap previously — the correct pattern
+# for a value a kernel needs to read at its CURRENT value each call.
+GRAD_B2_CLAMP = ti.field(ti.f64, shape=())
+GRAD_B2_CLAMP[None] = 30.0       # default for transport/cluster
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -933,7 +1556,8 @@ def B_and_gradB2(r: ti.types.vector(3, ti.f64)) -> ti.types.vector(4, ti.f64):
     # Soft clamp: gB2 *= C/√(|gB2|²+C²) → smooth everywhere.
     g2 = gB2.dot(gB2)
     if g2 > 1e-30:
-        soft_scale = GRAD_B2_CLAMP / ti.sqrt(g2 + GRAD_B2_CLAMP * GRAD_B2_CLAMP)
+        _clamp = GRAD_B2_CLAMP[None]   # F14: ti.field read, current value every call
+        soft_scale = _clamp / ti.sqrt(g2 + _clamp * _clamp)
         gB2 *= soft_scale
 
     return ti.Vector([gB2[0], gB2[1], gB2[2], Bmag])
@@ -947,32 +1571,77 @@ def chi_eff(B_mag: ti.f64) -> ti.f64:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# CONTACT MECHANICS (unchanged from v3.1)
+# CONTACT MECHANICS
 # ═══════════════════════════════════════════════════════════════════════════
 @ti.func
-def contact_pp(ri, rj, vi, vj):
+def _degenerate_normal(i: ti.i32, j: ti.i32) -> ti.types.vector(3, ti.f64):
+    """Deterministic unit vector for the d≈0 fallback in contact_pp (F2 fix).
+
+    Two coincident particles have no defined contact normal from their
+    positions. This derives one from the particle-index pair instead, using
+    an irrational-multiple hash so the direction is well spread and, by
+    construction (antisymmetric in i-j), n(j,i) = -n(i,j) — Newton's third
+    law still holds for the pair even in this degenerate case.
+    """
+    diff  = i - j
+    adiff = ti.abs(diff)
+    h1 = ti.cast(adiff, ti.f64) * 0.6180339887498949
+    h1 = h1 - ti.floor(h1)
+    h2 = ti.cast(adiff, ti.f64) * 0.3247179572447458
+    h2 = h2 - ti.floor(h2)
+    theta = h1 * 2.0 * PI
+    cz    = 2.0 * h2 - 1.0
+    sz    = ti.sqrt(ti.max(0.0, 1.0 - cz * cz))
+    sign  = 1.0
+    if diff < 0:
+        sign = -1.0
+    return sign * ti.Vector([sz * ti.cos(theta), sz * ti.sin(theta), cz])
+
+@ti.func
+def contact_pp(ri, rj, vi, vj, i: ti.i32, j: ti.i32):
     F   = ti.Vector([0.0, 0.0, 0.0])
     rij = ri - rj
     d   = rij.norm()
-    ov  = 2*C.R - d
-    if ov > 0 and d > 1e-12:
-        n    = rij / d
+    n = ti.Vector([0.0, 0.0, 0.0])
+    d_used = d
+    if d < 1e-9:
+        # Audit finding F2: the old guard `d > 1e-12` made exact coincidence
+        # (reachable via the F1 grid-overflow bug, or any integration
+        # pathology) an absorbing state — zero force forever, so coincident
+        # particles co-moved permanently instead of separating. Use a
+        # deterministic direction derived from the index pair instead.
+        n = _degenerate_normal(i, j)
+        d_used = 1e-9
+    else:
+        n = rij / d
+    ov = 2.0 * C.R - d_used
+    if ov > 0:
         vrel = vi - vj
         vn   = vrel.dot(n)
         vt   = vrel - vn * n
         sRd  = ti.sqrt(C.R_star * ov)
         kn   = (4.0/3.0) * C.E_star * sRd
         gn   = 2.0 * C.eta * ti.sqrt(ti.max(1e-30, C.m_star * kn))
-        Fn   = kn * ov - gn * vn
-        if Fn < 0:
-            Fn = 0.0
+        Fn_hertz = kn * ov - gn * vn
+        if Fn_hertz < 0:
+            Fn_hertz = 0.0
         Ft  = ti.Vector([0.0, 0.0, 0.0])
         vtm = vt.norm()
         if vtm > 1e-12:
             kt  = 8.0 * C.G_star * sRd
             gt  = 2.0 * C.eta * ti.sqrt(ti.max(1e-30, C.m_star * kt))
-            Ftm = ti.min(gt * vtm, C.mu_f * Fn)
+            Ftm = ti.min(gt * vtm, C.mu_f * Fn_hertz)
             Ft  = -Ftm * (vt / vtm)
+        # Audit finding F11: DMT adhesive pull-off, absent from all earlier
+        # versions (v1-v36) despite phase3_consolidation.py already relying
+        # on the same W_adh for grain-grain bonding. F_adh = 2*pi*R*_W_adh is
+        # the DMT limit (Derjaguin, Muller & Toporov 1975) for rigid,
+        # weakly-adhesive spheres. At R=30um this dominates lunar gravity by
+        # ~5000x (see CONTEXT.md "Physical limits") — two touching grains do
+        # not separate on their own, and realistic magnetic forces (~100xW
+        # after the F6/F7 recalibration) cannot pull them apart either.
+        F_adh = 2.0 * PI * C.R_star * C.W_adh
+        Fn = Fn_hertz - F_adh
         F = Fn * n + Ft
     return F
 
@@ -1026,6 +1695,7 @@ def contact_wall(p, v):
 # ═══════════════════════════════════════════════════════════════════════════
 @ti.kernel
 def build_grid():
+    grid_overflow_count[None] = 0
     for I in ti.grouped(grid_cnt):
         grid_cnt[I] = 0
     for i in range(C.N):
@@ -1035,6 +1705,16 @@ def build_grid():
         s = ti.atomic_add(grid_cnt[gx, gy, gz], 1)
         if s < MAXPC:
             grid_buf[gx, gy, gz, s] = i
+        else:
+            # Audit finding F1: previously grid_cnt kept the true (too-large)
+            # count and compute_forces read past grid_buf's end. Now the
+            # stored count is capped below (grid_cnt clamp), and any particle
+            # that didn't fit is counted here so overflow is visible instead
+            # of silently corrupting contact forces.
+            ti.atomic_add(grid_overflow_count[None], 1)
+    for I in ti.grouped(grid_cnt):
+        if grid_cnt[I] > MAXPC:
+            grid_cnt[I] = MAXPC
 
 @ti.kernel
 def compute_forces():
@@ -1052,10 +1732,18 @@ def compute_forces():
         fmag[i] = Fm
         F  += contact_wall(pos[i], vel[i])
 
-        # ── SURFACE CONFINEMENT — active during shape phase only ──────────
-        # Soft spring keeps particles on their assigned cylinder surface so
-        # inter-particle repulsion spreads them evenly rather than particles
-        # drifting off the surface.
+        # ── NON-PHYSICAL PLACEHOLDER: "surface confinement" (audit F9) ────
+        # ⚠ NOT A REAL FORCE. This spring has no physical source — vacuum
+        # exerts no restoring force, and there is no real surface for a
+        # particle to be "confined" to; the target cylinder is the thing
+        # this simulation is trying to demonstrate can be assembled, not a
+        # boundary condition it is permitted to assume. It stands in for
+        # whatever a Stage B magnetic-control law would need to actually
+        # provide (see CONTEXT.md "Physical limits and known placeholders").
+        # Per the Stage A audit decision this is *kept, not removed*, so the
+        # rest of the fixed simulation can be validated in isolation, but it
+        # must not be extended, retuned, or built upon — and must not be
+        # read as evidence that magnetic shaping works.
         if surf_conf_enabled[None] == 1:
             cid = cluster_id[i]
             rx  = pos[i][0] - C.cx
@@ -1074,7 +1762,9 @@ def compute_forces():
                     push = SURF_CONF_K * (r_xy - C.cR)
                     F[0] -= push * rx / r_xy
                     F[1] -= push * ry / r_xy
-                # Viscous damping — dissipates post-burst KE; particles settle
+                # Also part of the F9 placeholder above: vacuum has no drag.
+                # Stands in for whatever real dissipation (granular
+                # collisions, a real substrate) a Stage B design would need.
                 _db = C.mp / CAP_VISC_DAMP_TAU
                 F[0] -= _db * vel[i][0]
                 F[1] -= _db * vel[i][1]
@@ -1113,7 +1803,7 @@ def compute_forces():
                         for s in range(cnt):
                             j = grid_buf[nx, ny, nz, s]
                             if j != i:
-                                Fc = contact_pp(pos[i], pos[j], vel[i], vel[j])
+                                Fc = contact_pp(pos[i], pos[j], vel[i], vel[j], i, j)
                                 F += Fc
                                 if Fc.norm() > 1e-15: nc += 1
         frc[i]      = F
@@ -1125,13 +1815,16 @@ def compute_forces():
 # ═══════════════════════════════════════════════════════════════════════════
 @ti.kernel
 def integrate():
-    vcap = v_cap[None]
+    # Audit findings F6/F7: the hard velocity clip previously here made the
+    # simulation's kinematics set by the clipping rule rather than by F=ma —
+    # a single 8us step at the old GRAD_B2_CLAMP produced ~10x the transport
+    # v_cap in one step, so the clip was saturated essentially continuously.
+    # Removed. Stability now comes from the dt=3us timestep (F8) and the
+    # F6/F7 moment recalibration keeping forces in a physically bounded
+    # range, not from clipping the result after the fact.
     for i in range(C.N):
         a     = frc[i] / C.mp
         vel[i] += a * C.dt
-        speed = vel[i].norm()
-        if speed > vcap:
-            vel[i] = vel[i] / speed * vcap
         pos[i] += vel[i] * C.dt
         for ax in ti.static(range(3)):
             if pos[i][ax] < C.R:
@@ -1205,6 +1898,60 @@ def get_cluster_centroid_np(p_np, cl_np, cluster_idx):
     mask = cl_np == cluster_idx
     return np.mean(p_np[mask], axis=0) if np.any(mask) else C.qc_3d[cluster_idx].copy()
 
+def get_cluster_velocity_np(v_np, cl_np, cluster_idx):
+    """Real mean centroid velocity for a cluster (Stage A-2: closed-loop transport control
+    needs real velocity feedback, not just position — see CONTEXT.md sec 19)."""
+    mask = cl_np == cluster_idx
+    return np.mean(v_np[mask], axis=0) if np.any(mask) else np.zeros(3)
+
+_cluster_baseline = {}   # F21 Stage B: captured once per transport attempt
+
+def cluster_integrity(k):
+    """F21 Stage B: per-cluster integrity diagnostic. Mean/centroid position
+    alone can't distinguish "centroid reached the target" from "particles
+    stayed physically clustered and were transported coherently" -- this
+    reuses the same pos/cluster_id read pattern as cluster_stats() (no
+    redundant infrastructure) but reports per-axis spread and real extent,
+    not just the RMS scalar cluster_stats() already gives."""
+    if colors_fixed:
+        apply_fixed_colors()
+    else:
+        assign_clusters_initial()
+    p = pos.to_numpy()
+    cl = cluster_id.to_numpy()
+    mask = cl == k
+    n = int(mask.sum())
+    if n == 0:
+        return dict(n=0)
+    pp = p[mask]
+    cent = pp.mean(axis=0)
+    dv = pp - cent
+    sigma = dv.std(axis=0)
+    dist = np.linalg.norm(dv, axis=1)
+    rms = math.sqrt(np.mean(dist**2))
+    bbox = pp.max(axis=0) - pp.min(axis=0)
+    return dict(n=n, centroid=cent, sigma=sigma, rms=rms, max_dist=float(dist.max()), bbox=bbox)
+
+def report_cluster_integrity(k, label):
+    """Print a compact integrity line, with ratios vs. the pre-transport
+    baseline (captured lazily on first call per cluster) so expansion/
+    dispersal can be quantified relative to the cluster's own starting size."""
+    cs = cluster_integrity(k)
+    if cs['n'] == 0:
+        print(f"  [integrity {label}] cluster {k}: EMPTY (0 particles)")
+        return
+    base = _cluster_baseline.get(k)
+    if base is None:
+        _cluster_baseline[k] = cs
+        base = cs
+    rms_ratio = cs['rms'] / base['rms'] if base['rms'] > 1e-12 else float('nan')
+    max_ratio = cs['max_dist'] / base['max_dist'] if base['max_dist'] > 1e-12 else float('nan')
+    print(f"  [integrity {label}] cluster {k}: n={cs['n']}  "
+          f"sigma(xyz)=({cs['sigma'][0]*1e3:.4f},{cs['sigma'][1]*1e3:.4f},{cs['sigma'][2]*1e3:.4f})mm  "
+          f"RMS={cs['rms']*1e3:.4f}mm (x{rms_ratio:.2f} vs pre-transport)  "
+          f"max_r={cs['max_dist']*1e3:.4f}mm (x{max_ratio:.2f} vs pre-transport)  "
+          f"bbox=({cs['bbox'][0]*1e3:.3f},{cs['bbox'][1]*1e3:.3f},{cs['bbox'][2]*1e3:.3f})mm")
+
 def cluster_stats():
     if colors_fixed:
         apply_fixed_colors()
@@ -1250,6 +1997,19 @@ class PhaseManager:
         self.completed            = set()
         self.t_max                = 50.0
         self.handoff_t            = None
+        # Stage A-3 (F17): per-transport-attempt liftoff/lift tracking.
+        self.liftoff_start_z      = None   # real z captured once, at transport start
+        self.liftoff_confirmed_t  = None   # set once real net rise >= Z_LIFTOFF_CONFIRM
+        self.lift_cleared_t       = None   # set while real clearance >= LIFT_CLEARANCE
+        self.lift_done            = False  # latched true once LIFT_DWELL is satisfied
+        self._liftoff_stall_warned = False
+        self.transport_subphase   = ""     # diagnostic label set by update_dipoles()
+        # Stage A-4 (F18) failure-condition diagnostics — one-shot per
+        # transport attempt, see design doc §10 / HISTORY.md "Stage A-4".
+        self._cruise_sat_warned      = False  # solve_strength_for_accel clipped to s=1
+        self._cruise_clearance_warned = False  # real clearance regressed back near the floor
+        self._brake_sat_warned       = False  # F20: BRAKE's solve_strength_for_accel clipped to s=1
+        self._a_hat_prev             = None   # F21: previous step's realized aim direction (rate limit)
 
     def get_active_cluster(self):
         if self.state.startswith("transport_"):
@@ -1257,7 +2017,7 @@ class PhaseManager:
             return self.transport_order[idx]
         return -1
 
-    def update(self, t, cluster_centroids):
+    def update(self, t, cluster_centroids, cluster_velocities=None):
         if self.state == "settle":
             if t >= T_SETTLE_END:
                 self.state = "cluster"; self.phase_start_t = t
@@ -1267,28 +2027,84 @@ class PhaseManager:
                 self.state = "transport_0"; self.phase_start_t = t
                 self.arrived_t = None; self.handoff_t = None
                 self.current_transport_idx = 0
+                self._reset_liftoff_tracking()
 
         elif self.state.startswith("transport_"):
+            # Stage A-2: closed-loop arrival — BOTH position AND velocity must
+            # satisfy tolerance, continuously, for ARRIVAL_DWELL. Replaces the
+            # position-only check whose 4.0s TRANSPORT_BUDGET timeout was the
+            # PRIMARY completion path in every prior version (arrived_t was
+            # None at every checkpoint in the audited run — see HISTORY.md
+            # "Stage A-2"). TRANSPORT_BUDGET is gone; STALL_TIMEOUT is a
+            # diagnostic-only safety net that logs loudly if it ever fires.
             idx       = int(self.state.split("_")[1])
             cluster_k = self.transport_order[idx]
             target    = C.targets[cluster_k]
             centroid  = cluster_centroids[cluster_k]
             dist      = np.linalg.norm(centroid - target)
+            vmag      = (np.linalg.norm(cluster_velocities[cluster_k])
+                         if cluster_velocities is not None else 0.0)
             elapsed   = t - self.phase_start_t
 
-            if dist < ARRIVAL_THRESHOLD:
+            # Stage A-3 (F17): liftoff/lift tracking — verified from real
+            # sensed position, never assumed from the commanded strength.
+            if self.liftoff_start_z is None:
+                self.liftoff_start_z = centroid[2]
+            if self.liftoff_confirmed_t is None:
+                if centroid[2] - self.liftoff_start_z >= Z_LIFTOFF_CONFIRM:
+                    self.liftoff_confirmed_t = t
+                elif elapsed > LIFTOFF_STALL_TIMEOUT and not self._liftoff_stall_warned:
+                    print(f"  !!! LIFTOFF STALL: transport_{idx} (cluster {cluster_k}) never "
+                          f"confirmed real upward motion within LIFTOFF_STALL_TIMEOUT="
+                          f"{LIFTOFF_STALL_TIMEOUT}s (expected ~150-330ms) — z has risen only "
+                          f"{(centroid[2]-self.liftoff_start_z)*1e3:.4f}mm of the "
+                          f"{Z_LIFTOFF_CONFIRM*1e3:.4f}mm required. Investigate; the outer "
+                          f"STALL_TIMEOUT will still force completion if this persists. !!!")
+                    self._liftoff_stall_warned = True
+            if not self.lift_done and self.liftoff_confirmed_t is not None:
+                clearance = centroid[2] - C.R
+                if clearance >= LIFT_CLEARANCE:
+                    if self.lift_cleared_t is None:
+                        self.lift_cleared_t = t
+                    if t - self.lift_cleared_t >= LIFT_DWELL:
+                        self.lift_done = True
+                else:
+                    self.lift_cleared_t = None
+
+            # Stage A-4 failure condition (design §10): once lift_done is
+            # true, real clearance regressing back near the floor is the
+            # direct F18 regression signature (CRUISE dropping the cluster).
+            # A loud, one-shot diagnostic — not a silent recovery attempt.
+            if self.lift_done and self.arrived_t is None and not self._cruise_clearance_warned:
+                clearance_now = centroid[2] - C.R
+                if clearance_now < 0.5 * LIFT_CLEARANCE:
+                    print(f"  !!! CRUISE CLEARANCE REGRESSION: transport_{idx} (cluster "
+                          f"{cluster_k}) real floor clearance dropped to {clearance_now*1e3:.4f}mm "
+                          f"(< half of LIFT_CLEARANCE={LIFT_CLEARANCE*1e3:.2f}mm) after LIFT had "
+                          f"already cleared it — this is the F18 regression signature. "
+                          f"Investigate before trusting downstream phases. !!!")
+                    self._cruise_clearance_warned = True
+
+            if dist < EPS_X and vmag < EPS_V:
                 if self.arrived_t is None:
                     self.arrived_t = t
                     self.handoff_t = t
-                # Wait for handoff to complete (0.5s), then move to interlude
-                if t - self.arrived_t >= 0.5:
+                if t - self.arrived_t >= ARRIVAL_DWELL:
+                    report_cluster_integrity(cluster_k, f"ARRIVAL transport_{idx}")
                     self.completed.add(cluster_k)
                     self._advance_to_interlude(idx, t)
             else:
                 self.arrived_t = None
                 self.handoff_t = None
 
-            if elapsed > TRANSPORT_BUDGET:
+            if elapsed > STALL_TIMEOUT:
+                print(f"  !!! STALL: transport_{idx} (cluster {cluster_k}) did not converge "
+                      f"within STALL_TIMEOUT={STALL_TIMEOUT}s — forcing completion at "
+                      f"t={t:.3f}s  d={dist*1e3:.3f}mm  v={vmag*1e3:.1f}mm/s. "
+                      f"This is an abnormal event: the closed-loop controller failed to "
+                      f"bring the cluster to rest at its target. Investigate before trusting "
+                      f"downstream phases. !!!")
+                report_cluster_integrity(cluster_k, f"STALL transport_{idx}")
                 self.completed.add(cluster_k)
                 self._advance_to_interlude(idx, t)
 
@@ -1327,20 +2143,23 @@ class PhaseManager:
             self.arrived_t = None
             self.handoff_t = None
             self.current_transport_idx = next_idx
+            self._reset_liftoff_tracking()
         else:
             self.state = "shape"; self.phase_start_t = t
 
-    def get_transport_progress(self, t):
-        """Path progress: 0 during GRAB_TIME, then 0→1 over remaining budget."""
-        if not self.state.startswith("transport_"):
-            return 1.0
-        elapsed = t - self.phase_start_t
-        if elapsed < GRAB_TIME:
-            return 0.0  # Stationary grab phase — trap is ON but not moving
-        move_elapsed = elapsed - GRAB_TIME
-        move_budget  = TRANSPORT_BUDGET - GRAB_TIME
-        raw = min(move_elapsed / move_budget, 1.0)
-        return 0.5 * (1.0 - math.cos(PI * raw))
+    def _reset_liftoff_tracking(self):
+        """Stage A-3 (F17): re-arm liftoff/lift tracking for a new transport
+        attempt. liftoff_start_z is re-captured from the real centroid on the
+        first update() call of the new transport_k state (see above)."""
+        self.liftoff_start_z       = None
+        self.liftoff_confirmed_t   = None
+        self.lift_cleared_t        = None
+        self.lift_done             = False
+        self._liftoff_stall_warned = False
+        self._cruise_sat_warned       = False
+        self._cruise_clearance_warned = False
+        self._brake_sat_warned        = False
+        self._a_hat_prev              = None
 
     def is_done(self, t):
         return self.state == "hold" and (t - self.phase_start_t >= HOLD_TIME)
@@ -1349,7 +2168,9 @@ class PhaseManager:
         if self.state == "settle":   return "Settle"
         if self.state == "cluster":  return "Cluster"
         if self.state.startswith("transport_"):
-            return ["Mv→Top","Mv→Lft","Mv→Rgt","Mv→Bot"][int(self.state.split("_")[1])]
+            base = ["Mv→Top","Mv→Lft","Mv→Rgt","Mv→Bot"][int(self.state.split("_")[1])]
+            sub = f":{self.transport_subphase}" if self.transport_subphase else ""
+            return base + sub
         if self.state.startswith("interlude_"):
             return "Intrlde"
         if self.state == "shape":    return "Shape"
@@ -1365,6 +2186,10 @@ class PhaseManager:
             'handoff_t': self.handoff_t,
             'completed': list(self.completed),
             't_max': self.t_max,
+            'liftoff_start_z': self.liftoff_start_z,
+            'liftoff_confirmed_t': self.liftoff_confirmed_t,
+            'lift_cleared_t': self.lift_cleared_t,
+            'lift_done': self.lift_done,
         }
 
     def from_dict(self, d):
@@ -1376,6 +2201,16 @@ class PhaseManager:
         self.handoff_t            = d.get('handoff_t', None)
         self.completed            = set(d['completed'])
         self.t_max                = d['t_max']
+        self.liftoff_start_z      = d.get('liftoff_start_z', None)
+        self.liftoff_confirmed_t  = d.get('liftoff_confirmed_t', None)
+        self.lift_cleared_t       = d.get('lift_cleared_t', None)
+        self.lift_done            = d.get('lift_done', False)
+        self._liftoff_stall_warned = False
+        self._cruise_sat_warned       = False
+        self._cruise_clearance_warned = False
+        self._brake_sat_warned        = False
+        self._a_hat_prev              = None
+        self.transport_subphase   = ""
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1391,8 +2226,190 @@ _dip_s_buf = np.zeros(N_DIP, dtype=np.float64)
 _dip_p_buf = np.zeros((N_DIP, 3), dtype=np.float64)
 _dip_m_buf = np.zeros((N_DIP, 3), dtype=np.float64)
 
+# Stage A-2 (F16): cache for the live, real-position-anchored transport path
+# rebuilt once per transport attempt — see the CRUISE branch in
+# update_dipoles(). Keyed by pm.state so a new transport_k triggers a rebuild.
+_live_path_cache = {"state": None, "path": None, "avg_spacing": None}
 
-def update_dipoles(t, pm, cluster_centroids):
+# G3 (2026-08-19): persistent slow-well sweep progress for the wall
+# coverage-feedback controller, keyed by cluster index -- see the "WALL
+# SHAPING G3" block in update_dipoles(). Same pattern as _live_path_cache:
+# real, physically realizable actuator/controller state (a stored setpoint),
+# not a hidden force or a target-position filter.
+_wall_well_state = {}
+# G4 (2026-08-21): real captured post-slot hold position per wall cluster
+# (the actual sensed centroid at the moment the cluster entered its done
+# state), used instead of the original fixed target so the done/hold anchor
+# holds the cluster where the sweep actually left it. See the retention-
+# bookkeeping fix in update_dipoles()'s wall branch and HISTORY.md.
+_wall_final_pos = {}
+
+
+# ── F18 diagnostic instrumentation (Stage A-3) ──────────────────────────────
+# Debug-only: captures REAL per-control-step (6ms cadence, matching
+# CTRL_DT_NOMINAL) state for cluster 0 through the LIFT->CRUISE boundary, to
+# test the F18 hypothesis (LIFT reaches V_CEIL -> CRUISE throttles on TOTAL
+# speed -> throttle collapses -> vertical support disappears) against real
+# data rather than the 50ms print-log cadence or the whole-domain vm
+# diagnostic. Gated behind DEBUG_LIFT_CRUISE=1 so normal runs are unaffected.
+# Not part of the control law; reads state only, changes nothing.
+_dbg_lift_cruise = os.environ.get("DEBUG_LIFT_CRUISE", "0") == "1"
+_dbg_ring = []           # rolling buffer of recent LIFT-zone snapshots
+_dbg_cruise_count = [0]  # steps printed since first CRUISE snapshot
+_dbg_done = [False]
+_DBG_RING_MAX = 8
+_DBG_CRUISE_MAX = int(os.environ.get("DEBUG_CRUISE_MAX", "15"))
+_DBG_CLUSTER = int(os.environ.get("DEBUG_CLUSTER", "0"))  # F21 follow-up: which cluster to trace
+
+# F22 diagnostic (2026-08-17): the F21 extended-STALL_TIMEOUT experiment showed a
+# non-decaying near-arrival/excursion limit cycle rather than slow convergence.
+# Distinguishing H1 (CRUISE deadbeat too aggressive near target) / H2 (BRAKE late
+# or weak) / H3 (rate limiter bounds direction but not magnitude) / H4 (arrival
+# dwell broken by one bad step) requires the REAL commanded-acceleration vector
+# and rate-limiter behavior at the exact control step, not just the state
+# _debug_lift_cruise_snapshot already re-derives independently. update_dipoles
+# stashes its own real local a_cmd/a_hat/a_hat_raw here, at the exact point of
+# computation, so the snapshot function below can report them without
+# duplicating (and risking drifting from) the actual control law.
+_last_cmd_dbg = {}
+
+def _smoothstep(x):
+    x = min(max(x, 0.0), 1.0)
+    return 3.0*x*x - 2.0*x*x*x
+
+def _debug_lift_cruise_snapshot(t, pm, x_cur, v_cur, pos_np, cl_np):
+    if _dbg_done[0] or pm.state != f"transport_{_DBG_CLUSTER}":
+        return
+    sub = pm.transport_subphase
+    if sub not in ("LIFT", "LIFTOFF", "CRUISE", "BRAKE"):
+        return
+    mask0 = cl_np == _DBG_CLUSTER
+    n0 = int(mask0.sum())
+    if n0 == 0:
+        return
+    cluster_pos = pos_np[mask0]
+    dip_idx = IDX_CLUSTER_DIP[_DBG_CLUSTER]
+    dip_p = dip_pos_np[dip_idx].copy()
+    dip_m = dip_mom_np[dip_idx].copy()
+    dip_s = float(dip_str_np[dip_idx])
+    sep = float(np.linalg.norm(dip_p - x_cur))
+
+    # Real per-particle force from the FULL current active-dipole set (not
+    # just this one dipole) at the REAL current particle positions -- an
+    # independent numpy re-derivation of the exact live force law (same
+    # dipole-field Jacobian + soft vector clamp as B_and_gradB2), so this
+    # cross-checks the kernel rather than trusting it blindly.
+    clamp = float(GRAD_B2_CLAMP[None])
+    F_vert_total = 0.0
+    F_lat_total = np.zeros(2)
+    gmag_max = 0.0
+    for pi in cluster_pos:
+        B = np.zeros(3)
+        for kk in range(N_DIP):
+            sk = dip_str_np[kk]
+            if sk <= 1e-15: continue
+            mv = dip_mom_np[kk]*sk; rv = pi - dip_pos_np[kk]; r2 = rv@rv
+            if r2 <= 1e-22: continue
+            r5 = r2*r2*math.sqrt(r2); mdotr = mv@rv
+            B += (_MU0_4PI/r5) * (3.0*mdotr*rv - r2*mv)
+        Bmag = np.linalg.norm(B)
+        gB2 = np.zeros(3)
+        for kk in range(N_DIP):
+            sk = dip_str_np[kk]
+            if sk <= 1e-15: continue
+            mv = dip_mom_np[kk]*sk; rv = pi - dip_pos_np[kk]; r2 = rv@rv
+            if r2 <= 1e-22: continue
+            r5 = r2*r2*math.sqrt(r2); mdotrv = mv@rv; Bdotrv = B@rv; mdotB = mv@B
+            c5 = _MU0_4PI/r5; c7 = 15.0*_MU0_4PI/(r5*r2)
+            gB2 += 2.0*(c5*(3.0*Bdotrv*mv + 3.0*mdotrv*B + 3.0*mdotB*rv) - c7*mdotrv*Bdotrv*rv)
+        raw_gmag = np.linalg.norm(gB2)
+        gmag_max = max(gmag_max, raw_gmag)
+        g2 = gB2@gB2
+        if g2 > 1e-30:
+            gB2 = gB2 * (clamp/math.sqrt(g2+clamp*clamp))
+        ce = C.chi / math.cosh(min(C.chi*Bmag/(MU0*C.Msat), 20.0))**2
+        Fp = (C.Vp*ce/(2*MU0)) * gB2
+        F_vert_total += Fp[2]
+        F_lat_total += Fp[:2]
+
+    W = C.mp * C.g
+    W_cluster = n0 * W
+    net_a_z = (F_vert_total - W_cluster) / (n0*C.mp)
+    vmag_total = float(np.linalg.norm(v_cur))
+    v_z = float(v_cur[2])
+    thr_vert  = 1.0 - _smoothstep(max(v_z, 0.0)/V_CEIL) if V_CEIL > 0 else 1.0
+    thr_total = 1.0 - _smoothstep(vmag_total/V_CEIL) if V_CEIL > 0 else 1.0
+    sat_frac = gmag_max / clamp if clamp > 0 else 0.0
+
+    d_to_target = float(np.linalg.norm(C.targets[_DBG_CLUSTER] - x_cur))
+    v_horiz = float(math.hypot(v_cur[0], v_cur[1]))
+    cmd = _last_cmd_dbg.get(_DBG_CLUSTER, {})
+    # arrival-dwell state (F22 diagnostic, H4): pm.arrived_t is set the instant
+    # d<EPS_X and v<EPS_V both hold, and reset to None the instant either fails
+    # (no hysteresis on the dwell itself) -- read directly, not re-derived.
+    in_dwell = pm.arrived_t is not None
+    dwell_elapsed = (t - pm.arrived_t) if in_dwell else float('nan')
+    row = dict(t=t, sub=sub, x=x_cur.copy(), v=v_cur.copy(), vmag=vmag_total, v_z=v_z,
+               v_horiz=v_horiz,
+               Fz=F_vert_total, Flat=np.linalg.norm(F_lat_total), W_cluster=W_cluster,
+               net_a_z=net_a_z, s=dip_s, thr_vert=thr_vert, thr_total=thr_total,
+               vratio_vert=max(v_z,0.0)/V_CEIL, vratio_total=vmag_total/V_CEIL,
+               dip_p=dip_p.copy(), dip_m_hat=(dip_m/max(np.linalg.norm(dip_m),1e-30)),
+               sep=sep, sat_frac=sat_frac, n0=n0, d=d_to_target,
+               zone=cmd.get("zone", "?"), e_vec=cmd.get("e_vec", np.full(3, float('nan'))),
+               a_cmd=cmd.get("a_cmd", np.full(3, float('nan'))),
+               a_cmd_mag_raw=cmd.get("a_cmd_mag_raw", float('nan')),
+               a_cmd_mag=cmd.get("a_cmd_mag", float('nan')),
+               a_hat_raw=cmd.get("a_hat_raw", np.full(3, float('nan'))),
+               a_hat=cmd.get("a_hat", np.full(3, float('nan'))),
+               dtheta_wanted=cmd.get("dtheta_wanted", float('nan')),
+               dtheta_realized=cmd.get("dtheta_realized", float('nan')),
+               a_needed=cmd.get("a_needed", float('nan')),
+               in_dwell=in_dwell, dwell_elapsed=dwell_elapsed,
+               eps_x_pass=d_to_target < EPS_X, eps_v_pass=vmag_total < EPS_V)
+
+    if sub in ("LIFT", "LIFTOFF"):
+        _dbg_ring.append(row)
+        if len(_dbg_ring) > _DBG_RING_MAX:
+            _dbg_ring.pop(0)
+    else:  # CRUISE / BRAKE (F19/F20 diagnostic extension: was CRUISE-only)
+        if _dbg_cruise_count[0] == 0:
+            print("\n" + "="*140)
+            print("F19/F20 DIAGNOSTIC: real per-control-step state, last LIFT steps -> LIFT/CRUISE boundary -> CRUISE/BRAKE")
+            print("="*140)
+            hdr = (f"{'t(s)':>8} {'sub':>7} {'zone':>10} {'z(mm)':>8} {'d(mm)':>7} {'ex,ey,ez(mm)':>22} "
+                   f"{'vz(mm/s)':>9} {'vh(mm/s)':>9} {'|v|(mm/s)':>10} "
+                   f"{'Fz(xW)':>8} {'Flat(xW)':>8} {'net_az':>8} {'s':>6} "
+                   f"{'sep(mm)':>8} {'satfrac':>8} {'a_cmd_raw':>10} {'a_cmd':>8} {'a_needed':>9} "
+                   f"{'dth_want':>9} {'dth_real':>9} {'dwell':>10} {'pass(x,v)':>10}")
+            print(hdr)
+            for r in _dbg_ring:
+                _print_dbg_row(r)
+        _print_dbg_row(row)
+        _dbg_cruise_count[0] += 1
+        if _dbg_cruise_count[0] >= _DBG_CRUISE_MAX:
+            _dbg_done[0] = True
+            print("="*140)
+            print("F19/F20 DIAGNOSTIC: capture window complete.\n")
+
+def _print_dbg_row(r):
+    ev = r.get('e_vec', np.full(3, float('nan')))
+    ev_str = f"{ev[0]*1e3:6.3f},{ev[1]*1e3:6.3f},{ev[2]*1e3:6.3f}"
+    dwell_str = (f"{r['dwell_elapsed']*1e3:7.1f}ms" if r.get('in_dwell') else "  --  ")
+    pass_str = f"{'X' if r.get('eps_x_pass') else '.'}{'V' if r.get('eps_v_pass') else '.'}"
+    print(f"{r['t']:8.4f} {r['sub']:>7} {r.get('zone','?'):>10} {r['x'][2]*1e3:8.4f} {r.get('d',float('nan'))*1e3:7.3f} "
+          f"{ev_str:>22} "
+          f"{r['v_z']*1e3:9.3f} {r.get('v_horiz',float('nan'))*1e3:9.3f} {r['vmag']*1e3:10.3f} "
+          f"{r['Fz']/r['W_cluster']:8.3f} {r['Flat']/r['W_cluster']:8.3f} {r['net_a_z']:8.3f} "
+          f"{r['s']:6.4f} {r['sep']*1e3:8.4f} {r['sat_frac']:8.4f} "
+          f"{r.get('a_cmd_mag_raw',float('nan')):10.3f} {r.get('a_cmd_mag',float('nan')):8.3f} "
+          f"{r.get('a_needed',float('nan')):9.3f} "
+          f"{math.degrees(r.get('dtheta_wanted',float('nan'))):9.3f} "
+          f"{math.degrees(r.get('dtheta_realized',float('nan'))):9.3f} "
+          f"{dwell_str:>10} {pass_str:>10}")
+
+
+def update_dipoles(t, pm, cluster_centroids, cluster_velocities=None):
     """
     Update all dipole positions, moments, and strengths.
 
@@ -1402,6 +2419,12 @@ def update_dipoles(t, pm, cluster_centroids):
       Arrival: dipole parks at target + d_lead*normal, stays at full strength.
       Hold: same dipole, same position, same strength. ZERO topology change.
       Hold ring (IDX_HOLD_A/B) DISABLED — always strength=0.
+
+    cluster_velocities: dict {k: real mean velocity of cluster k's particles},
+      or None. Only used by the active-transport branch (Stage A-2 closed-loop
+      controller); None is safe for all other call sites (diagnostics,
+      skip-to-shape) where transport isn't active. See "CLOSED-LOOP TRANSPORT
+      CONTROLLER" below.
     """
     global dip_str_np
     s = _dip_s_buf
@@ -1415,14 +2438,24 @@ def update_dipoles(t, pm, cluster_centroids):
     is_transporting = pm.state.startswith("transport_")
     is_interlude    = pm.state.startswith("interlude_")
 
-    # Phase-specific gradient clamp (global used inside Taichi kernel)
-    global GRAD_B2_CLAMP
+    # Phase-specific gradient clamp guard (F14: GRAD_B2_CLAMP is a ti.field —
+    # see its declaration for why a plain Python global silently never took
+    # effect at runtime in every prior version of this file).
     if pm.state == "shape":
-        GRAD_B2_CLAMP = SHAPE_MAX_GRAD_CLAMP
-        surf_conf_enabled[None] = 1
+        GRAD_B2_CLAMP[None] = SHAPE_MAX_GRAD_CLAMP
     else:
-        GRAD_B2_CLAMP = 2000.0
-        surf_conf_enabled[None] = 0
+        GRAD_B2_CLAMP[None] = 30.0   # matches the module-level default (F6/F7)
+    # G3 (2026-08-19): surf_conf is NEVER enabled in production anymore. The
+    # feasibility gate (analysis/SHAPING_FEASIBILITY_GATE_2026-08-19.md)
+    # showed it is 6-12 orders of magnitude stronger than any real force in
+    # this simulation and was actively disrupting the wall's real near-field
+    # hold (surf_conf ON left walls WORSE off than surf_conf OFF, same
+    # ideal-start test). It remains in compute_forces(), fully documented,
+    # as a non-physical historical/ablation reference only (CLAUDE.md: kept,
+    # not extended) — surf_conf_enabled simply never gets set to 1 again, so
+    # it is permanently inert in any real run. Caps therefore have zero
+    # shape-phase support (see cap-hold feasibility failure, same report) —
+    # this is the honest state of the current methodology, not a bug.
 
     # ── CORNER QUADRUPOLES ────────────────────────────────────────────
     corner_strength = ramp(t, T_SETTLE_END, T_SETTLE_END + 1.5)
@@ -1505,8 +2538,9 @@ def update_dipoles(t, pm, cluster_centroids):
     #     - dipole → exact target position
     #     - B² max = at dipole = at target
     #     Arrival slide then smoothly parks dipole at exact target over 0.5s.
-
-    _SLIDE_DUR = 0.5  # Duration to slide dipole from lead position to target
+    #     (Stage A-2: this comment describes the pre-redesign behavior; the
+    #     "arrival slide" is now the SETTLE zone of the closed-loop
+    #     controller below, driven by real position+velocity feedback.)
 
     # Start with all transport/hold dipoles OFF
     for idx in IDX_TRAP:
@@ -1554,25 +2588,94 @@ def update_dipoles(t, pm, cluster_centroids):
                     # the dipole (z-2mm) → cluster pulled DOWN toward z-2mm. BUG.
                     # New code: dipole at target position, moment = inward radial
                     # (-x for Q1, +x for Q2) → B² max displaced toward wall.
-                    # Provides wall-normal restoring only; zero z-force. ✓
-                    # Gravity is balanced by particle-particle contacts (bottom-up pile).
+                    #
+                    # G3 (2026-08-19) FIX #1: this branch used to switch to a
+                    # z-lift-only config (no radial component) while k was the
+                    # active cluster, on the assumption that surf_conf would
+                    # carry radial confinement during the active slot ("surface
+                    # confinement spring handles r=cR" — the old comment, now
+                    # false: surf_conf is permanently disabled, see G3 in
+                    # HISTORY.md). With surf_conf gone that switch left the
+                    # active cluster with ZERO radial holding from this dipole
+                    # at exactly the moment it needed it most — confirmed via a
+                    # real full-cycle validation run: cluster 1 was thrown to
+                    # d_tgt=8.05mm within 2s of its slot starting.
+                    #
+                    # G3 FIX #2 (2026-08-20, supersedes the first attempt at
+                    # fix #1 above): making this anchor stay on, unconditionally,
+                    # during the active slot re-broke coverage a different way.
+                    # A full-cycle validation run (g3_wall_validation3.json)
+                    # showed the active cluster's real centroid never leaving
+                    # a ~30um neighborhood of the ORIGINAL fixed target for the
+                    # entire 5s active slot, while its velocity climbed to
+                    # 20-35mm/s (energy pumped in, no net coverage motion) —
+                    # i.e. exactly the signature of two competing near-field
+                    # attractors, not one. Root cause: this anchor sits at
+                    # the target with ZERO standoff while scan_idx (below)
+                    # tries to translate away from that same point; near-field
+                    # force ~1/r^4, so the instant scan_idx moves even
+                    # slightly the anchor (still at r=0) dominates and the
+                    # cluster stays pinned to the anchor instead of following
+                    # the sweep. scan_idx is deliberately built to replicate
+                    # this exact hold config at slot start (same position,
+                    # moment, strength — see analysis/SHAPING_FEASIBILITY_
+                    # GATE_2026-08-19.md, which validated this geometry ALONE,
+                    # with no second competing dipole present), so it can carry
+                    # sole responsibility once active — matching the
+                    # already-documented design principle above ("with anchor
+                    # OFF, the scan dipole is the only attractor -> works").
+                    # Anchor is therefore OFF only during the active slot;
+                    # wait/done states are unaffected (still hold at s>0 below).
+                    #
+                    # G4 retention-bookkeeping fix (2026-08-21): the done-state
+                    # anchor used to hold at the ORIGINAL fixed `target`
+                    # unconditionally. But the sweep controller (scan_idx)
+                    # displaces the real cluster away from that exact point by
+                    # design (that is its whole job) -- confirmed by the full
+                    # 4-cluster validation (g5_full_validation.json): cluster 1
+                    # drifted from 0.95mm to 6.03mm off target, LEAVING its
+                    # radial envelope entirely, during the ~5.5s after its own
+                    # slot ended, because the done anchor kept pulling it back
+                    # toward the original center point instead of holding it
+                    # where the sweep actually left it. Fixed: capture the real
+                    # sensed centroid ONCE, the first control step the cluster
+                    # is seen in the done state, and hold at that realized
+                    # position (with a matching realized radial moment
+                    # direction) instead of the original target. This is
+                    # real captured controller/actuator state (same category as
+                    # `_wall_well_state`'s stored setpoint), not a hidden force
+                    # or a cluster-ID-filtered force -- the field law and its
+                    # dependence on dipole position/moment/strength are
+                    # unchanged; only the recorded aim point differs from
+                    # ORIGINAL-target to ACTUALLY-realized-position.
                     if k == active_shape_k:
-                        # Weak upward z-lift to counteract gravity on the wall surface.
-                        # At 1 mm above target, s=0.10 → F_z ≈ 2× gravity, allows axial spread.
-                        # No radial component — surface confinement spring handles r=cR.
-                        p[dip_idx] = np.array([target[0], target[1], target[2] + 1.0e-3])
-                        m[dip_idx] = _m_trap * np.array([0., 0., 1.])
-                        s[dip_idx] = 0.10
+                        p[dip_idx] = np.array([target[0], target[1], target[2]])
+                        if k == 1:
+                            m[dip_idx] = _m_trap * np.array([-1., 0., 0.])
+                        else:
+                            m[dip_idx] = _m_trap * np.array([1., 0., 0.])
+                        s[dip_idx] = 0.0   # scan_idx is sole attractor while active
+                    elif k_order_idx < shape_slot:
+                        if k not in _wall_final_pos:
+                            _wall_final_pos[k] = np.array(cluster_centroids[k], dtype=np.float64)
+                        hold_pos = _wall_final_pos[k]
+                        dxr, dyr = hold_pos[0] - C.cx, hold_pos[1] - C.cy
+                        rr = math.hypot(dxr, dyr)
+                        p[dip_idx] = hold_pos
+                        if rr > 1e-9:
+                            m[dip_idx] = _m_trap * np.array([-dxr / rr, -dyr / rr, 0.0])
+                        elif k == 1:
+                            m[dip_idx] = _m_trap * np.array([-1., 0., 0.])
+                        else:
+                            m[dip_idx] = _m_trap * np.array([1., 0., 0.])
+                        s[dip_idx] = SHAPE_DONE_HOLD_STRENGTH * 1.5
                     else:
                         p[dip_idx] = np.array([target[0], target[1], target[2]])
                         if k == 1:
-                            m[dip_idx] = _m_trap * np.array([-1., 0., 0.])  # Q1: inward (-x)
+                            m[dip_idx] = _m_trap * np.array([-1., 0., 0.])
                         else:
-                            m[dip_idx] = _m_trap * np.array([1., 0., 0.])   # Q2: inward (+x)
-                        if k_order_idx < shape_slot:
-                            s[dip_idx] = SHAPE_DONE_HOLD_STRENGTH * 1.5
-                        else:
-                            s[dip_idx] = SHAPE_WAIT_HOLD_STRENGTH
+                            m[dip_idx] = _m_trap * np.array([1., 0., 0.])
+                        s[dip_idx] = SHAPE_WAIT_HOLD_STRENGTH
 
             elif pm.state == "hold":
                 # HOLD PHASE: maintain shaped geometry without collapsing it.
@@ -1582,8 +2685,22 @@ def update_dipoles(t, pm, cluster_centroids):
                     p[dip_idx] = np.array([C.cx, C.cy, -5.0e-3])
                     s[dip_idx] = 0.0
                 else:  # walls
-                    p[dip_idx] = np.array([target[0], target[1], target[2]])
-                    if k == 1:
+                    # G4 retention-bookkeeping fix (2026-08-21): same fix as the
+                    # shape-phase done-state anchor above -- hold at the
+                    # realized sweep-final position, not the original target,
+                    # if one was captured; falls back to `target` only if this
+                    # cluster somehow entered hold without going through a
+                    # shape done-state first (defensive, should not happen in
+                    # the normal phase sequence).
+                    if k not in _wall_final_pos:
+                        _wall_final_pos[k] = np.array(cluster_centroids[k], dtype=np.float64)
+                    hold_pos = _wall_final_pos[k]
+                    dxr, dyr = hold_pos[0] - C.cx, hold_pos[1] - C.cy
+                    rr = math.hypot(dxr, dyr)
+                    p[dip_idx] = hold_pos
+                    if rr > 1e-9:
+                        m[dip_idx] = _m_trap * np.array([-dxr / rr, -dyr / rr, 0.0])
+                    elif k == 1:
                         m[dip_idx] = _m_trap * np.array([-1., 0., 0.])
                     else:
                         m[dip_idx] = _m_trap * np.array([1., 0., 0.])
@@ -1607,95 +2724,406 @@ def update_dipoles(t, pm, cluster_centroids):
                     s[dip_idx] = 0.5
 
         elif active_cluster == k and is_transporting:
-            progress    = pm.get_transport_progress(t)
-            path        = transport_paths[k]
-            n_wp        = len(path)
-            path_idx    = min(int(math.floor(progress * (n_wp - 1))), n_wp - 1)
-            path_target = path[path_idx]
-
-            cluster_cen = cluster_centroids[k]
-            elapsed     = t - pm.phase_start_t
-            trap_in     = ramp(t, pm.phase_start_t, pm.phase_start_t + 0.3)
+            # ── Stage A-2 CLOSED-LOOP TRANSPORT CONTROLLER (F7/F15) ──────────
+            # Replaces the old pure time-schedule (get_transport_progress,
+            # removed) with real position+velocity feedback. Full physical
+            # derivation: "CLOSED-LOOP TRANSPORT CONTROLLER" block near the
+            # top of this file. HISTORY.md "Stage A-2" has the regression this
+            # fixes (removing the hard velocity cap in F7 was correct, but the
+            # old transport law had nothing else opposing velocity).
+            #
+            # The dipole's real position/moment/strength are the ONLY things
+            # the controller ever touches — the force every particle feels
+            # remains exactly F=(Vp*chi_eff/2mu0)*grad(B^2), computed by the
+            # unmodified compute_forces kernel. Velocity feedback only decides
+            # where to place the real dipole for the NEXT control step —
+            # exactly how any real closed-loop electromagnet is driven — never
+            # a force added directly to a particle, never filtered by
+            # cluster_id (every particle in the domain still feels every
+            # active dipole's real field, unchanged).
+            x_cur  = cluster_centroids[k]
+            v_cur  = (cluster_velocities[k] if cluster_velocities is not None
+                      else np.zeros(3))
+            target = C.targets[k]
+            e_vec  = target - x_cur
+            d      = np.linalg.norm(e_vec)
+            vmag   = np.linalg.norm(v_cur)
+            trap_in = ramp(t, pm.phase_start_t, pm.phase_start_t + 0.3)
+            # F21: hysteresis needs to know which zone the PREVIOUS control
+            # step ended in, captured before any branch below overwrites it.
+            _prev_sub = pm.transport_subphase
+            # Stage B: capture the pre-transport integrity baseline once,
+            # on this cluster's very first control step of this attempt
+            # (cheap dict-lookup guard -- cluster_integrity() itself does a
+            # GPU->CPU transfer, so only run it once, not every step).
+            if k not in _cluster_baseline:
+                _cluster_baseline[k] = cluster_integrity(k)
 
             if pm.arrived_t is not None:
-                # ARRIVAL PHASE: Smoothly slide dipole from near-target to exact target.
-                # Over _SLIDE_DUR (0.5s), the dipole position interpolates to target.
-                # By arrival time, d_lead is already very small (progress ≈ 1.0),
-                # so the slide distance is minimal — smooth and gentle.
-                target = C.targets[k]
+                # SETTLE / HOLD: dipole at a fixed, safe standoff off the
+                # target along the surface normal — NOT coincident with the
+                # particles' own location, avoiding the singular near-field
+                # right where they sit. Strength has modest headroom (3x)
+                # over the acceleration needed to balance gravity at this
+                # standoff; cross-talk onto other targets is already
+                # negligible at this field scale (verified, see
+                # analysis/reconstruct_run.py cross-talk checks).
+                pm.transport_subphase = "SETTLE"
                 normal = _target_normals[k]
-                slide_frac = ramp(t, pm.arrived_t, pm.arrived_t + _SLIDE_DUR)
-                # At arrival, lead was already reduced. Use small residual offset.
-                # The lead_reduction at progress=1.0 is 1.0, so effective_d = 0.
-                # But at the instant of arrival, progress may be ~0.95, so there
-                # could be a small residual. Slide from that to zero.
-                residual_lead = _d_lead * (1.0 - ramp(progress, 0.8, 1.0))
-                lead_pos = target + residual_lead * normal
-                p[dip_idx] = lead_pos + slide_frac * (target - lead_pos)
-                # Interpolate moment: -normal → transverse (ŷ)
-                mom_transport = -_m_trap * normal
-                mom_hold      = _m_trap * np.array([0., 1., 0.])
-                m[dip_idx] = mom_transport + slide_frac * (mom_hold - mom_transport)
-                s[dip_idx] = 1.0  # Full strength throughout
+                p[dip_idx] = target + D_HOLD * normal
+                m[dip_idx] = -_m_trap * normal
+                s_hold = solve_strength_for_accel(3.0 * C.g, D_HOLD)
+                s[dip_idx] = max(s_hold, 0.02)
+
+            elif not pm.lift_done:
+                # LIFTOFF / LIFT (Stage A-3, F17 fix; deadbeat law Stage A-4,
+                # F18 fix): clustering only regroups particles laterally at
+                # floor level — z stays pinned at C.R the whole time (verified
+                # from real VTU data, see HISTORY.md "Stage A-3") — so every
+                # transport genuinely starts needing a real vertical climb
+                # against gravity.
+                #
+                # Dipole tracks directly above the real-time lateral centroid
+                # at the same safe standoff (_d_lead=0.5mm) used everywhere
+                # else in this controller — verified (real 64-particle
+                # geometry, not point-mass) to give 30x margin over the real
+                # cluster weight with zero clamp saturation, and lateral
+                # force/torque from the real particle asymmetry negligible
+                # (0.05% of vertical, ~0 implied angular accel). Moment points
+                # straight down (attractive, pulling up).
+                #
+                # Stage A-4 (F18): the old ramp+smoothstep-throttle law didn't
+                # reference the real control period, so a full-strength 6ms
+                # step regularly overshot V_CEIL by 30-60% before the throttle
+                # reacted (measured directly: v_z spiking to 10-13mm/s against
+                # an 8mm/s ceiling) — a real, if self-correcting, bang-bang
+                # oscillation. Replaced with a one-step-ahead (deadbeat)
+                # predictor using the actual known control period
+                # (CTRL_DT_NOMINAL): the gross vertical acceleration commanded
+                # is exactly what's needed to land v_z at V_CEIL after one
+                # control step, floored so the *correction* term (not the
+                # total) never goes negative — this guarantees the commanded
+                # force is never less than what's needed to just hold
+                # altitude (Fz/Mg >= 1.0 always while this law is active,
+                # verified numerically: 1.82x at v_z=0, exactly 1.00x at/above
+                # V_CEIL, never below — see HISTORY.md "Stage A-4"), and
+                # reaches V_CEIL in exactly one control step with no
+                # overshoot (v_z_new = v_z + (V_CEIL-v_z) = V_CEIL).
+                #
+                # LIFTOFF is verified complete only once the real z position
+                # has actually risen (Z_LIFTOFF_CONFIRM, checked in
+                # PhaseManager.update() from real sensed position) — not
+                # assumed from the commanded strength. LIFT continues the
+                # identical law until real floor clearance is reached and
+                # sustained (LIFT_DWELL); only then does pm.lift_done latch
+                # true and CRUISE/BRAKE become reachable below.
+                pm.transport_subphase = "LIFT" if pm.liftoff_confirmed_t is not None else "LIFTOFF"
+                v_z = v_cur[2]
+                a_vert_gross = C.g + max(0.0, (V_CEIL - v_z) / CTRL_DT_NOMINAL)
+                s_lift = solve_strength_for_accel(a_vert_gross, LIFT_CLEARANCE)
+                p[dip_idx] = np.array([x_cur[0], x_cur[1], x_cur[2] + LIFT_CLEARANCE])
+                m[dip_idx] = np.array([0.0, 0.0, -_m_trap])
+                s[dip_idx] = s_lift
+                # F21: LIFT's aim direction is always straight up by
+                # construction; keep pm._a_hat_prev synced to it so CRUISE's
+                # rate limiter is already active from its very FIRST real
+                # step (the original F19 spike happened exactly at this
+                # handoff) rather than starting unlimited (a_hat_prev=None).
+                pm._a_hat_prev = np.array([0.0, 0.0, 1.0])
+
+            elif d > (D_BRAKE_EXIT if _prev_sub == "BRAKE" else D_BRAKE_TRIGGER):
+                # CRUISE (Stage A-4, F18 fix): the old law used ONE pull
+                # direction (path tangent) and ONE scalar throttle (function
+                # of TOTAL speed) to do two independent physical jobs —
+                # vertical support and horizontal pursuit — at once. Because
+                # free-fall increases total speed, that throttle actively
+                # suppressed the very force needed to stop the fall: measured
+                # directly, thr_total collapsed to exactly 0.0 one control
+                # step after CRUISE engaged and never recovered (vr_tot climbed
+                # 1.33->1.43->2.30->3.39->4.54->4.93->6.12 as free-fall kept
+                # adding speed), while LIFT's OWN vertical-only throttle had
+                # already shown that decoupled-from-horizontal control
+                # self-corrects within 1-2 steps. See HISTORY.md "Stage A-4".
+                #
+                # Fix: two independent channels, each fed by an independent
+                # real speed measurement, composed into one 3-D acceleration
+                # vector and realized by a SINGLE dipole via the same on-axis
+                # convention used everywhere else in this controller (a
+                # dipole at x_cur + r*a_hat, moment -a_hat, delivers force of
+                # magnitude F(r,s) in EXACTLY direction a_hat — proven
+                # sufficient at r=_d_lead=0.5mm: 30.4x cluster weight
+                # available there (F17 audit table, real 64-particle
+                # geometry), an 11.1x margin over the largest combined target
+                # used below (6.87 m/s^2) — so this is never a stretch for a
+                # single dipole, no multi-dipole configuration is needed).
+                #
+                # Vertical channel (F19 fix, see below): a signed ceiling-
+                # tracking law fed by v_z and the real signed height error —
+                # never perturbed by horizontal motion, but (unlike LIFT,
+                # and unlike this branch's original Stage A-4 form) no
+                # longer floored at hover. LIFT's Fz>=Mg guarantee still
+                # holds for LIFT itself (monotonic climb, no overshoot
+                # recovery needed there); CRUISE's vertical channel can
+                # command net descent (Fz<Mg) when genuinely above target,
+                # which is required to escape a real, observed deadlock
+                # (Finding F19) — see the F19 comment at this branch's
+                # a_vert_gross computation for the full derivation.
+                # Horizontal channel: same deadbeat style, fed by HORIZONTAL
+                # speed only (v_x,v_y — never v_z), so free-fall cannot
+                # suppress it and it cannot suppress vertical support — this
+                # is the actual fix, breaking the positive-feedback loop.
+                # Direction is the real pure-pursuit lookahead point (nearest
+                # waypoint + lookahead on the existing, unchanged
+                # collision-avoiding path arc — make_transport_path() and its
+                # live re-anchoring at the real position, F16, are unchanged),
+                # projected to the horizontal plane, since the vertical
+                # component of travel is now handled by the vertical channel.
+                #
+                # Because the vector is composed BEFORE realization, the
+                # delivered vertical force component equals a_vert_gross
+                # exactly — not degraded by whatever the horizontal channel
+                # needs — which is what makes the Fz>=Mg guarantee real. The
+                # standoff is now a FIXED constant (_d_lead=0.5mm, same as
+                # LIFT/BRAKE/SETTLE), not path-derived, so the separation-
+                # runaway mechanism that caused F17 cannot recur by
+                # construction (no clamp needed — there is nothing to clamp).
+                pm.transport_subphase = "CRUISE"
+                if _live_path_cache["state"] != pm.state:
+                    _other_tgts = [C.targets[j] for j in range(4)
+                                   if j != k and j in pm.completed]
+                    _live_path_cache["path"] = make_transport_path(
+                        x_cur, target, clearance=0.3e-3,
+                        other_targets=_other_tgts if _other_tgts else None)
+                    _plen = float(np.sum(np.linalg.norm(
+                        np.diff(_live_path_cache["path"], axis=0), axis=1)))
+                    _live_path_cache["avg_spacing"] = _plen / max(
+                        1, len(_live_path_cache["path"]) - 1)
+                    _live_path_cache["state"] = pm.state
+                path = _live_path_cache["path"]
+                n_wp = len(path)
+                avg_spacing = _live_path_cache["avg_spacing"]
+
+                diffs = path - x_cur
+                nearest_idx = int(np.argmin(np.sum(diffs*diffs, axis=1)))
+                lookahead_n = max(1, int(round(
+                    PURSUIT_LOOKAHEAD / max(avg_spacing, 1e-9))))
+                path_idx = min(nearest_idx + lookahead_n, n_wp - 1)
+                path_target = path[path_idx]
+
+                v_z      = v_cur[2]
+                # F19 fix: the vertical channel must be able to command
+                # descent, not just varying amounts of lift. Previously
+                # a_vert_gross = g + max(0,...) floored at hover (g) and
+                # could never go net-negative, so a cluster that overshot
+                # its target height (verified real cause: a transient
+                # clamp-saturation spike at the LIFT->CRUISE handoff, see
+                # HISTORY.md Finding F19) could never reduce its height
+                # error — d stayed > D_BRAKE_TRIGGER on the vertical
+                # component alone, so BRAKE was never entered, and the
+                # cluster deadlocked until STALL_TIMEOUT forced completion
+                # (reproduced on 2 of 4 real transports; confirmed 187.6mm/s
+                # peak Vmag at the spike in the diagnosed run).
+                #
+                # Fix: mirror the horizontal channel's existing ceiling-
+                # tracking form, but take the ceiling's SIGN from the sign
+                # of the real height error instead of hardwiring "always
+                # ascend." This makes the vertical channel symmetric: it
+                # tracks +V_CEIL while below target, -V_CEIL while above
+                # it, exactly like the horizontal channel already does
+                # (which never had this asymmetry and converges cleanly).
+                # No braking taper is added here on purpose: real
+                # kinematic braking happens in the BRAKE branch below once
+                # d <= D_BRAKE_TRIGGER (see its F20 fix comment — BRAKE
+                # itself also needed a gravity-accounting correction,
+                # found only after this CRUISE fix let a real transport
+                # reach BRAKE with nonzero vertical velocity for the first
+                # time). Validated
+                # with a synthetic double-integrator test (no simulation
+                # run) against the real a_max/g/V_CEIL/D_BRAKE_TRIGGER
+                # constants and the real observed F19 overshoot/velocity
+                # states: all cases converge within STALL_TIMEOUT with zero
+                # chattering and <=43% of the a_max force budget used.
+                # NOTE (caught by a real-sim check after the first version of
+                # this fix): a_vert_gross is NOT the net acceleration — the
+                # downstream a_hat/solve_strength_for_accel realize it as the
+                # DIPOLE'S OWN force/mass contribution (gravity acts
+                # separately, always, at -g). The old law's "C.g +" term
+                # was that offset, not an unrelated floor. Dropping it
+                # (first attempt) made a merely-negative deadbeat term read
+                # as "pull DOWN with extra force on top of gravity",
+                # roughly doubling real descent (confirmed via
+                # DEBUG_LIFT_CRUISE live instrumentation: net_az=-1.834m/s^2
+                # the instant v_z=10.2mm/s ticked just above V_CEIL=8mm/s,
+                # vs. the intended mild -0.37m/s^2 net correction).
+                # F23 fix (2026-08-18, see CAPTURE_RADIUS/A_GLIDE/_v_glide_mag derivation
+                # above): both channels previously referenced a DISCONTINUOUS step-function
+                # target speed (vertical: always +-V_CEIL, sign flipping instantly at the
+                # position-error crossing; horizontal: ceiling-only, never asked for
+                # deceleration). Diagnosed (F22) as the actual root cause of the near-field
+                # direction-reversal chatter that F21's rate limiter and F22's realization
+                # change each tried, and failed, to absorb downstream. Fix here, upstream:
+                # taper each channel's REFERENCE speed continuously with its own distance
+                # (_v_glide_mag), so the reference magnitude is already ~0 by the time either
+                # channel's sign/direction would flip — eliminating the discontinuity at its
+                # source rather than trying to realize it more gently. Far from target
+                # (d >> CAPTURE_RADIUS=0.9mm) this is identical to the old ceiling behavior.
+                e_z = target[2] - x_cur[2]
+                v_ref_z_mag = _v_glide_mag(abs(e_z))
+                v_ref_z = math.copysign(v_ref_z_mag, e_z) if e_z != 0.0 else 0.0
+                a_vert_gross  = C.g + (v_ref_z - v_z) / CTRL_DT_NOMINAL
+
+                horiz_vec  = np.array([path_target[0]-x_cur[0], path_target[1]-x_cur[1], 0.0])
+                horiz_norm = np.linalg.norm(horiz_vec)
+                e_horiz    = horiz_vec/horiz_norm if horiz_norm > 1e-9 else np.zeros(3)
+                # Track the SIGNED velocity component along e_horiz (toward path_target), not
+                # the unsigned |v_horiz| the old law used — this lets the channel genuinely
+                # decelerate overshoot instead of merely stopping acceleration at the ceiling.
+                v_horiz_signed = float(np.dot(np.array([v_cur[0], v_cur[1], 0.0]), e_horiz))
+                v_ref_h_mag = _v_glide_mag(horiz_norm)
+                a_horiz_gross = (v_ref_h_mag - v_horiz_signed) / CTRL_DT_NOMINAL
+
+                a_cmd = np.array([0.0, 0.0, a_vert_gross]) + a_horiz_gross*e_horiz
+                a_cmd_mag = np.linalg.norm(a_cmd)
+                a_hat_raw = a_cmd/a_cmd_mag if a_cmd_mag > 1e-12 else np.array([0.0, 0.0, 1.0])
+
+                # F21: rate-limit the aim direction (see DTHETA_MAX/
+                # _rate_limit_hat derivation) — the dipole's real position
+                # only depends on a_hat's DIRECTION (standoff r=_d_lead is
+                # fixed regardless of strength), so capping direction-change
+                # rate is what actually prevents the sweep from crossing
+                # close to a real edge particle. Magnitude is then realized
+                # via a raised-cosine weighting of the direction mismatch
+                # (F22 fix — see _realize_command_mag docstring): never the
+                # raw magnitude along a stale direction (shown unstable by
+                # synthetic testing), but also never collapsed to exactly
+                # zero for an extended run of steps merely because the raw
+                # target is >90 degrees away (the original F21 clamp did
+                # this, and real per-step data showed it produced repeated
+                # multi-step free-fall windows that caused, not prevented,
+                # large excursions — see HISTORY.md "F22 diagnostic").
+                a_hat = _rate_limit_hat(pm._a_hat_prev, a_hat_raw)
+                dtheta_applied = math.acos(min(1.0, max(-1.0, float(np.dot(
+                    pm._a_hat_prev, a_hat_raw))))) if pm._a_hat_prev is not None else 0.0
+                dtheta_realized = math.acos(min(1.0, max(-1.0, float(np.dot(
+                    pm._a_hat_prev, a_hat))))) if pm._a_hat_prev is not None else 0.0
+                a_cmd_mag_raw = a_cmd_mag
+                # F22 REVERTED (2026-08-18): _realize_command_mag's raised-cosine weighting
+                # passed every cheap synthetic/math test but made the REAL Gate 2 transport_0
+                # run measurably WORSE, not better -- see HISTORY.md "F22 fix: designed,
+                # implemented, REVERTED after real Gate 2 regression". Restored the original
+                # F21 clamp-to-zero realization, which remains the best real validated result
+                # to date (STALL at d=0.867mm, v=8.7mm/s, zero saturation events).
+                a_cmd_mag = max(0.0, float(np.dot(a_cmd, a_hat)))
+                pm._a_hat_prev = a_hat
+                if _dbg_lift_cruise:
+                    _last_cmd_dbg[k] = dict(zone="CRUISE", a_cmd=a_cmd.copy(),
+                        a_cmd_mag_raw=a_cmd_mag_raw, a_cmd_mag=a_cmd_mag,
+                        a_hat_raw=a_hat_raw.copy(), a_hat=a_hat.copy(),
+                        dtheta_wanted=dtheta_applied, dtheta_realized=dtheta_realized,
+                        e_vec=(target-x_cur).copy())
+
+                s_cruise = solve_strength_for_accel(a_cmd_mag, _d_lead)
+                p[dip_idx] = x_cur + _d_lead * a_hat
+                m[dip_idx] = -_m_trap * a_hat
+                s[dip_idx] = s_cruise
+
+                # Stage A-4 failure condition (design §10): the combined
+                # vertical+horizontal target should never approach the
+                # r=_d_lead ceiling (verified 11.1x margin at typical targets)
+                # — if it does, that's a real finding to report, not hide.
+                if s_cruise >= 0.999 and not pm._cruise_sat_warned:
+                    print(f"  !!! CRUISE SATURATION: cluster {k} commanded strength clipped "
+                          f"to s=1.0 at t={t:.3f}s (a_cmd_mag={a_cmd_mag:.2f}m/s^2 exceeds the "
+                          f"r={_d_lead*1e3:.2f}mm ceiling). The 11.1x design margin did not hold "
+                          f"here — investigate rather than trust downstream phases. !!!")
+                    pm._cruise_sat_warned = True
+
             else:
-                # v13.2: TRANSPORT — lead from PATH WAYPOINT, not cluster centroid.
+                # BRAKE (d <= D_BRAKE_TRIGGER, not yet arrived).
                 #
-                # Physics: B² maximum is at the dipole. By placing the dipole at
-                # path_target + d_lead * tangent, the cluster is attracted directly
-                # toward the path waypoint (the B² max is there or just ahead).
+                # F24 (2026-08-18): law replaced. See BRAKE_ZETA/BRAKE_OMEGA_N/
+                # _brake_accel_pd's derivation above for the full mechanism
+                # diagnosis and design rationale. a_net_req is now the desired
+                # NET (total, physical) acceleration from a critically-damped
+                # spring-damper toward the target, valid at any v including
+                # v=0 (unlike the old law, which needed a separate v~=0
+                # fallback branch — removed here, folded into the one law).
                 #
-                # Path tangent: direction from current waypoint to next waypoint.
-                # This gives a stable direction that doesn't oscillate with the
-                # cluster position (unlike centroid-chasing).
-                #
-                # Lead reduction: as progress → 1.0, d_lead → 0. This ensures
-                # the dipole converges to the final target position at path end.
-                # Uses cosine ramp from progress=0.8 to progress=1.0 for C¹ smooth.
+                # F20 fix (gravity handling) is UNCHANGED and still applies:
+                # gravity (`F[2] -= C.mp*C.g` in the integrator) is applied
+                # unconditionally every step, independent of the dipole, so
+                # the dipole must supply a_net_req PLUS whatever cancels
+                # gravity's separately-applied effect: F_dip/mp = a_net_req +
+                # (0,0,g), realized as one dipole at magnitude/direction
+                # a_hat = normalize(F_dip/mp) — same convention as CRUISE and
+                # the pre-F24 BRAKE law, not a new mechanism.
+                pm.transport_subphase = "BRAKE"
+                a_net_req = _brake_accel_pd(e_vec, v_cur)
+                F_over_mp = a_net_req + np.array([0.0, 0.0, C.g])
+                a_cmd_mag = np.linalg.norm(F_over_mp)
+                a_hat_raw = F_over_mp/a_cmd_mag if a_cmd_mag > 1e-12 else np.array([0.0, 0.0, 1.0])
 
-                # Compute path tangent from waypoint differences
-                next_idx = min(path_idx + 1, n_wp - 1)
-                if next_idx > path_idx:
-                    tangent = path[next_idx] - path[path_idx]
-                    tang_norm = np.linalg.norm(tangent)
-                    if tang_norm > 1e-9:
-                        tangent = tangent / tang_norm
-                    else:
-                        tangent = _target_normals[k]
-                else:
-                    # At end of path — tangent is surface normal
-                    tangent = _target_normals[k]
+                # F21: same rate-limit + magnitude-realization treatment
+                # as CRUISE (see that branch's comment and
+                # _realize_command_mag's docstring for the full F22
+                # derivation) — BRAKE's dipole placement is also at a
+                # fixed standoff (R_DECEL0=_d_lead=0.5mm) regardless of
+                # strength, so the same near-field sweep risk and the
+                # same zero-force dead-zone risk both apply here too. F24's
+                # PD law is expected to trigger this dead zone far less often
+                # since it no longer commands large sudden direction swings
+                # near the target — but the safeguard itself is untouched.
+                a_hat = _rate_limit_hat(pm._a_hat_prev, a_hat_raw)
+                dtheta_applied = math.acos(min(1.0, max(-1.0, float(np.dot(
+                    pm._a_hat_prev, a_hat_raw))))) if pm._a_hat_prev is not None else 0.0
+                dtheta_realized = math.acos(min(1.0, max(-1.0, float(np.dot(
+                    pm._a_hat_prev, a_hat))))) if pm._a_hat_prev is not None else 0.0
+                a_cmd_mag_raw = a_cmd_mag
+                # F22 REVERTED (2026-08-18): see the CRUISE branch's identical comment above
+                # and HISTORY.md — restored the original F21 clamp-to-zero realization.
+                a_cmd_mag = max(0.0, float(np.dot(F_over_mp, a_hat)))
+                pm._a_hat_prev = a_hat
+                if _dbg_lift_cruise:
+                    _last_cmd_dbg[k] = dict(zone="BRAKE", a_cmd=F_over_mp.copy(),
+                        a_cmd_mag_raw=a_cmd_mag_raw, a_cmd_mag=a_cmd_mag,
+                        a_hat_raw=a_hat_raw.copy(), a_hat=a_hat.copy(),
+                        dtheta_wanted=dtheta_applied, dtheta_realized=dtheta_realized,
+                        e_vec=(target-x_cur).copy(), a_needed=np.linalg.norm(a_net_req))
 
-                # Smoothly reduce lead distance as we approach end of path
-                lead_reduction = ramp(progress, 0.8, 1.0)  # 0 at prog<0.8, 1 at prog=1.0
-                effective_dlead = _d_lead * (1.0 - lead_reduction)
-
-                # Place dipole at path waypoint + reduced lead along tangent
-                p[dip_idx] = path_target + effective_dlead * tangent
-                # Moment points from dipole toward path_target (attracts cluster)
-                m[dip_idx] = -_m_trap * tangent
-                s[dip_idx] = trap_in  # Ramp in over 0.3s
+                s_decel  = solve_strength_for_accel(a_cmd_mag, R_DECEL0)
+                p[dip_idx] = x_cur + R_DECEL0 * a_hat
+                m[dip_idx] = -_m_trap * a_hat
+                s[dip_idx] = s_decel
+                if s_decel >= 0.999 and not pm._brake_sat_warned:
+                    print(f"  !!! BRAKE SATURATION: cluster {k} commanded strength clipped "
+                          f"to s=1.0 at t={t:.3f}s (a_cmd_mag={a_cmd_mag:.2f}m/s^2 exceeds the "
+                          f"r={R_DECEL0*1e3:.2f}mm ceiling) — investigate rather than trust "
+                          f"downstream phases. !!!")
+                    pm._brake_sat_warned = True
 
         # else: cluster not yet active → dipole stays OFF (s=0)
 
-    # ── HOLD RING — enabled for caps during shape AND hold phases ─────────────
-    # Cap clusters (Q0, Q3) need z-pinning from the transverse pair throughout
-    # shaping AND the final hold phase. Without this, rings fall as soon as
-    # the state transitions from "shape" to "hold".
-    # Wall clusters (Q1, Q2) do NOT use hold rings (their gravity is ⊥ to normal;
-    # z-support comes from the wall anchor dipole during shaping and gentle
-    # retention during hold).
+    # ── HOLD RING — PERMANENTLY DISABLED (audit finding F4) ────────────────
+    # This apparatus is named/commented throughout the file as a "4-dipole
+    # square ring" with a B² maximum at its center by 4-fold symmetry, but
+    # only 2 of the 4 nominal positions (IDX_HOLD_A/B, at +-x offsets) were
+    # ever actually instantiated (the +-y positions the v31 comment above
+    # describes were never added — see the v31 comment block, which itself
+    # admits this). Two dipoles are two point B² attractors, not a ring: in
+    # the pre-fix simulation, activating them at hold-state entry pulled the
+    # ENTIRE Q0/Q3 cluster onto the +x dipole (verified against
+    # outputs/phase2_checkpoint.pkl: final Q0 centroid (7.49,4.97,7.10)mm
+    # sits on dip12 at (7.50,5.00,7.24)mm, spread collapsed to ~0). This is
+    # the terminal "everything gets sucked to a point outside the cylinder"
+    # failure reported at the end of Phase 2. Fixing it means not
+    # re-tuning CAP_SHAPE_HOLD_S but removing the activation: a correct
+    # symmetric ring is a Stage B design question (needs a real 4th/8th
+    # dipole set with genuine 4-fold or higher symmetry — see CONTEXT.md
+    # Physical limits section), not a Stage A parameter fix. Kept at s=0 for
+    # all states; index/checkpoint slots remain allocated for compatibility.
     for k in range(4):
         s[IDX_HOLD_A[k]] = 0.0
         s[IDX_HOLD_B[k]] = 0.0
-    # Caps get hold pair ONLY during hold phase (NOT during shaping).
-    # During shaping, surf_conf z-spring alone handles z-pinning (no external
-    # shape dipoles active for caps). The ±x hold dipoles broke azimuthal
-    # symmetry → 2-lobe splitting → keep them OFF during shaping.
-    if pm.state == "hold":
-        for cap_k in (0, 3):
-            if cap_k in pm.completed:
-                s[IDX_HOLD_A[cap_k]] = CAP_SHAPE_HOLD_S
-                s[IDX_HOLD_B[cap_k]] = CAP_SHAPE_HOLD_S
 
     # ── SHAPE DIPOLES — v29 STATIC EXTERNAL RING / VERTICAL RAKE ────────────
     #
@@ -1856,86 +3284,132 @@ def update_dipoles(t, pm, cluster_centroids):
                 pass  # no external shape dipoles for caps
 
             else:
-                # ── WALL SHAPING v33: FAST OSCILLATING SCAN ON CYLINDER OUTER SURFACE ──
+                # ── WALL SHAPING G3 (2026-08-19): COVERAGE-FEEDBACK SLOW WELL ──────
                 #
-                # Single dipole scans a raster:
-                #   phi:  fast ±60° back-and-forth oscillation around tgt_phi
-                #         N_PHI_SWEEPS=10 complete oscillations over the slot
-                #   z:    cosine oscillation z_lo↔z_hi, 4 cycles over slot
-                #   r:    cR + 0.3mm (close to wall → strong gradient)
-                #   moment: inward radial + 45% upward tilt (increased from 30% for
-                #           better z-support as dipole sweeps away from particle)
+                # Replaces the v33 fast (~14mm/s) raster, which was deliberately
+                # too fast for particles to follow (outrun-and-deposit). The final
+                # pre-implementation feasibility gate
+                # (analysis/SHAPING_FEASIBILITY_GATE_2026-08-19.md) tested this
+                # exact dipole geometry — zero standoff (dipole AT the target
+                # surface point), pure radial-inward moment, strength
+                # SHAPE_WAIT_HOLD_STRENGTH (the SAME real, validated "wait" hold
+                # config already used elsewhere in this file, see
+                # IDX_CLUSTER_DIP's wait branch above) — translated slowly in
+                # azimuth against a real 64-particle wall cluster:
+                #   - tracking error is speed-independent (dominated by an
+                #     intrinsic ~0.13mm radial oscillation, not lag) up to 5mm/s
+                #   - degrades at 10mm/s, catastrophically fails at 15mm/s
+                #     (particles left behind entirely, Fmag -> ~0)
+                # This independently confirms, from direct simulation, the same
+                # v_tan~14mm/s "particles cannot follow" threshold the old v33
+                # code already documented analytically -- WELL_V_TAN=3mm/s
+                # (module constant) keeps a >=1.7x margin under the clean
+                # ceiling actually measured.
                 #
-                # WHY ±60° NOT ±90° (old design):
-                #   Old ±90° linear sweep: ω=0.628 rad/s → v_tan=1.05mm/s << v_cap → orbit/follow
-                #   New ±60° fast oscillation: ω_avg≈8.4 rad/s → v_tan≈14mm/s >> v_cap → deposition ✓
-                #   Constrained to ±60° (=PHI_HALF_SPAN) to avoid contaminating the opposite wall
-                #   cluster target (Q1↔Q2 are π apart; ±60° leaves a 60° safety gap). ✓
+                # CLOSED-LOOP, NOT OPEN-LOOP: the aim point only advances while
+                # the real (sensed) cluster centroid stays within
+                # WELL_TRACK_ERR_MAX of it; otherwise it freezes until the
+                # cluster catches up -- this never deliberately outruns the
+                # particles (unlike v33, which was explicitly designed to).
+                # Coverage is a simple (theta, z) raster: sweep the full
+                # +-PHI_HALF_SPAN arc at one z level, step to the next z level,
+                # repeat -- WELL_N_Z_LEVELS bands span the wall height. The
+                # +-60 deg arc limit is unchanged from v33 (safety gap to the
+                # opposite wall cluster, Q1/Q2 are pi apart).
                 #
-                # DEPOSITION MATH:
-                #   N_PHI_SWEEPS=10, PHI_HALF_SPAN=π/3 (60°)
-                #   ω_avg = 4·(π/3)·10 / T_slot = 8.38 rad/s
-                #   v_tan = 8.38 · cR = 8.38 · 1.667e-3 = 13.97mm/s >> v_cap=5mm/s ✓
-                #   Particles cannot follow → deposited in stripes across the ±60° arc. ✓
-                #
-                # Z-SUPPORT:
-                #   sin_tilt increased 0.30→0.45: z-force component = 0.45·F_mag vs 0.30 before.
-                #   This helps support wall particles against gravity (g=1.62 m/s²) when the
-                #   scan dipole is at moderate phi offsets from the particle. ✓
-                #
-                # Cluster anchor (IDX_CLUSTER_DIP for active wall k) stays OFF:
-                #   The initial loop at top of update_dipoles sets all IDX_TRAP s=0.
-                #   The per-cluster loop does `pass` for active_shape_k.
-                #   This block does NOT set dip_wall_idx → anchor remains OFF. ✓
+                # Persistent state (_wall_well_state, module-level, same pattern
+                # as the transport controller's _live_path_cache) tracks sweep
+                # progress across calls -- this is a real, physically realizable
+                # control state (an actuator's stored setpoint), not a target-
+                # position filter or hidden force.
                 tgt_phi = math.atan2(tgt[1] - C.cy, tgt[0] - C.cx)
+                PHI_HALF_SPAN = PI / 3.0   # +-60 deg -- unchanged safety gap to opposite wall
+                Z_CAP_MARGIN = 0.75e-3     # unchanged from v33 -- keeps sweep off the cap rims
+                # G3 bugfix #1 (found via full-cycle validation + isolated
+                # control-logic debug): C.targets[k] is not exactly at radius
+                # C.cR (measured discrepancy: 0.20mm for Q1) -- fixed by
+                # deriving r_scan from the real target radius, not C.cR.
+                r_scan = math.hypot(tgt[0] - C.cx, tgt[1] - C.cy)
+                z_lo_m = C.z_lo + Z_CAP_MARGIN
+                z_hi_m = C.z_hi - Z_CAP_MARGIN
 
-                # phi: fast back-and-forth within ±PHI_HALF_SPAN around target azimuth.
-                # Triangle wave: local_frac → phi oscillates -SPAN→+SPAN→-SPAN N_PHI_SWEEPS times.
-                # ω_avg = 4·PHI_HALF_SPAN·N_PHI_SWEEPS / T_slot ≈ 8.38 rad/s → v_tan≈14mm/s >> v_cap
-                N_PHI_SWEEPS = 10.0
-                PHI_HALF_SPAN = PI / 3.0   # ±60° — safe gap to opposite wall cluster
-                _phi_t = (local_frac * N_PHI_SWEEPS * 2.0) % 2.0   # sawtooth 0→2
-                _phi_t = _phi_t if _phi_t <= 1.0 else 2.0 - _phi_t  # triangle wave [0,1]
-                phi_scan = tgt_phi + PHI_HALF_SPAN * (2.0 * _phi_t - 1.0)
+                # G3 bugfix #2: an earlier version stepped z in WELL_N_Z_LEVELS
+                # discrete jumps once each phi sweep completed. Each jump
+                # (~0.83mm for 4 levels) instantly exceeded WELL_TRACK_ERR_MAX
+                # (0.30mm) the moment it fired, and since the wall's anchor
+                # dipole (IDX_CLUSTER_DIP, still active in parallel) keeps
+                # holding the cluster tightly at the ORIGINAL target height,
+                # the gate could never recover -- verified directly: even
+                # after fixing bug #1, z_level froze permanently one step
+                # after its very first (correctly-initialized) jump. Fixed by
+                # replacing discrete z-levels with a continuous, slow z-creep
+                # at the SAME validated linear rate as the phi sweep (paced to
+                # nominally traverse the wall height once per ~5s slot) so no
+                # single step can ever exceed the tracking tolerance.
+                if active_shape_k not in _wall_well_state:
+                    z_frac0 = 0.0 if (z_hi_m - z_lo_m) < 1e-12 else \
+                        min(1.0, max(0.0, (tgt[2] - z_lo_m) / (z_hi_m - z_lo_m)))
+                    _wall_well_state[active_shape_k] = dict(
+                        phi_frac=0.5, direction=1, z_frac=z_frac0, z_direction=1, last_t=t)
+                wst = _wall_well_state[active_shape_k]
 
-                # z: cosine oscillation, 4 full up-down cycles over slot
-                N_Z_CYC = 4.0
-                z_phase  = (local_frac * N_Z_CYC) % 1.0
-                z_scan   = C.z_lo + 0.5 * C.cH * (1.0 - math.cos(PI * z_phase))
+                z_scan = z_lo_m + wst["z_frac"] * (z_hi_m - z_lo_m)
+                phi_scan = tgt_phi + PHI_HALF_SPAN * (2.0 * wst["phi_frac"] - 1.0)
 
-                d_wall = 0.3e-3    # 0.3mm outside cylinder wall
-                r_scan = C.cR + d_wall
                 px = C.cx + r_scan * math.cos(phi_scan)
                 py = C.cy + r_scan * math.sin(phi_scan)
-                p[scan_idx] = [px, py, z_scan]
+                aim_point = np.array([px, py, z_scan])
+                p[scan_idx] = aim_point
+                m[scan_idx] = _m_trap * np.array(
+                    [-math.cos(phi_scan), -math.sin(phi_scan), 0.0])
+                s[scan_idx] = SHAPE_WAIT_HOLD_STRENGTH
 
-                # Moment: radially inward (confinement to wall) + 45% upward (better z-support)
-                sin_tilt = 0.45
-                cos_tilt = math.sqrt(max(0.0, 1.0 - sin_tilt * sin_tilt))
-                m[scan_idx] = _m_shape * np.array([
-                    -math.cos(phi_scan) * cos_tilt,
-                    -math.sin(phi_scan) * cos_tilt,
-                    sin_tilt,
-                ])
-                s[scan_idx] = shape_str
+                # ── tracking-error gate: advance only if the cluster is keeping up ──
+                real_centroid = cluster_centroids[active_shape_k]
+                track_err = float(np.linalg.norm(real_centroid - aim_point))
+                dt_ctrl = max(t - wst["last_t"], 0.0)
+                wst["last_t"] = t
+                if track_err <= WELL_TRACK_ERR_MAX and dt_ctrl > 0.0:
+                    arc_len = 2.0 * PHI_HALF_SPAN * r_scan
+                    d_frac_phi = (WELL_V_TAN * dt_ctrl) / arc_len
+                    wst["phi_frac"] += wst["direction"] * d_frac_phi
+                    if wst["phi_frac"] >= 1.0:
+                        wst["phi_frac"] = 1.0
+                        wst["direction"] = -1
+                    elif wst["phi_frac"] <= 0.0:
+                        wst["phi_frac"] = 0.0
+                        wst["direction"] = 1
+                    # G3 bugfix #4 (2026-08-20): z used to WRAP (z_frac -= 1.0)
+                    # once it exceeded 1.0, teleporting the aim point's z by
+                    # the full span (2.5mm measured) in a single control step
+                    # -- confirmed directly via fine-grained instrumentation
+                    # (analysis/runs/g3_fix3_finegrained_3p5.json): track_err
+                    # jumped from 0.0025mm to 2.25mm in one ~20ms step exactly
+                    # when z_frac wrapped 0.9999->0.0001, producing a brief
+                    # huge force transient (Fmag spiked ~1000x) that flung the
+                    # still-coherent cluster (r_rms unchanged) out of the
+                    # well's effective range entirely. phi already reverses
+                    # direction at its bounds instead of wrapping (see above)
+                    # -- z now does the same, for consistency and to remove
+                    # the discontinuity.
+                    SLOT_NOMINAL_S = SHAPE_TIME / 4.0
+                    d_frac_z = dt_ctrl / SLOT_NOMINAL_S
+                    wst["z_frac"] += wst["z_direction"] * d_frac_z
+                    if wst["z_frac"] >= 1.0:
+                        wst["z_frac"] = 1.0
+                        wst["z_direction"] = -1
+                    elif wst["z_frac"] <= 0.0:
+                        wst["z_frac"] = 0.0
+                        wst["z_direction"] = 1
+                # else: aim point frozen this step -- cluster has not caught up
 
-    # ── VELOCITY CAP — phase-adaptive ────────────────────────────────
-    # The cap is a numerical safety limit, not a physical constraint.
-    # Root cause of Q0 transport lag: the Q0 cosine arc (floor→7.5mm apex)
-    # has peak dipole speed ≈ π/2 × 4.47 mm/s ≈ 7.0 mm/s over the first
-    # half of move_budget=3.7s. With cap=5mm/s the cluster can't keep pace,
-    # falls >2mm behind, force drops as 1/r⁴, gravity wins → cluster drops.
-    # Fix: raise cap to 12mm/s during transport so cluster can follow dipole.
-    if pm.state in ("settle", "cluster"):
-        v_cap[None] = 0.025   # fast initial pile formation
-    elif pm.state.startswith("transport_"):
-        v_cap[None] = 0.012   # must exceed peak dipole speed ~7mm/s (Q0 arc)
-    elif pm.state.startswith("interlude_"):
-        v_cap[None] = 0.003   # damp residual velocity after transport
-    elif pm.state == "shape":
-        v_cap[None] = 0.005   # balanced surface spreading
-    else:                      # hold
-        v_cap[None] = 0.002   # minimal drift during final hold
+    # Audit findings F6/F7: the phase-adaptive hard velocity cap that used
+    # to be set here was removed along with the clip in integrate(). Speed
+    # is now whatever F=ma actually produces; the wall-scan "deposition, not
+    # chasing" argument used a hard v_cap as its comparison baseline
+    # (v_tan >> v_cap) and must be re-verified empirically against real
+    # particle speeds post-fix (see analysis/validate_phase2.py) rather than
+    # assumed from a removed design constant.
 
     # ── Upload to Taichi and sync monitoring array ────────────────────
     dip_p.from_numpy(p)
@@ -1943,6 +3417,13 @@ def update_dipoles(t, pm, cluster_centroids):
     dip_s.from_numpy(s)
     np.copyto(dip_str_np, s)
     np.copyto(dip_mom_np, m)    # v19: sync for energy tracking diagnostic
+    # Audit finding F10: dip_pos_np was never synced from the per-batch
+    # working buffer `p`, only dip_mom_np/dip_str_np were — so checkpoints
+    # (save_checkpoint/save_shape_checkpoint read dip_pos_np directly)
+    # stored stale dipole positions instead of the true positions being
+    # simulated. Restored dipole positions after --resume were therefore
+    # wrong until the next update_dipoles() call overwrote them.
+    np.copyto(dip_pos_np, p)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2277,7 +3758,6 @@ def init():
     ncontact.from_numpy(np.zeros(n, dtype=np.int32))
     qc_ti.from_numpy(C.qc)
     assign_centres.from_numpy(C.qc_3d)
-    v_cap[None] = 0.025
     surf_conf_enabled[None] = 0
     dip_p.from_numpy(dip_pos_np)
     dip_m.from_numpy(dip_mom_np)
@@ -2340,11 +3820,11 @@ PHASE SEQUENCE:
   settle(0.3s) → cluster(2.5s) → [transport+interlude]×4 → shape(20s) → hold(2.5s)
 
 OUTPUT:
-  VTK frames → outputs/Phase2_v5_Fixed/asm_NNNNNNN.vtu
-  Animation  → outputs/Phase2_v5_Fixed/simulation.pvd  (open in ParaView)
+  VTK frames → outputs/Phase2/asm_NNNNNNN.vtu
+  Animation  → outputs/Phase2/simulation.pvd  (open in ParaView)
   Checkpoint → outputs/phase2_checkpoint.pkl            (auto-saved every 1s)
   Shape ckpt → outputs/shape_checkpoint.pkl             (saved once at shape start)
-  Diagnostics→ outputs/Phase2_v5_Fixed/diagnostics.png
+  Diagnostics→ outputs/Phase2/diagnostics.png
 """)
     parser.add_argument('--no-checkpoint',    action='store_true',
                         help='Ignore any existing checkpoint; always start from scratch.')
@@ -2416,9 +3896,9 @@ OUTPUT:
         print(f"  [chi-scale] chi reduced by {args.chi_scale}x: chi = {C.chi:.4e}")
         if args.chi_scale <= 0.05:
             # At very low chi, gradients need more headroom before clamping
-            global GRAD_B2_CLAMP
-            GRAD_B2_CLAMP = 2500.0
-            print(f"  [chi-scale] GRAD_B2_CLAMP increased to {GRAD_B2_CLAMP} for low-chi regime")
+            # (F14: GRAD_B2_CLAMP is now a ti.field, see its declaration)
+            GRAD_B2_CLAMP[None] = 40.0
+            print(f"  [chi-scale] GRAD_B2_CLAMP increased to {GRAD_B2_CLAMP[None]} for low-chi regime")
 
     print("=" * 72)
     print("  REGO Phase 2 -- Earnshaw-Compliant Sequential Plow v21.0")
@@ -2444,7 +3924,14 @@ OUTPUT:
     print(f"    SEQUENTIAL: one cluster at a time, order {SHAPE_ORDER}")
     print(f"    Each cluster: {SHAPE_TIME/4:.1f}s shaping")
     print(f"    Hold for inactive clusters (s=0.5), retention sweep for shaped (s=0.3)")
-    print(f"    Transport: leads from PATH waypoint (not centroid)")
+    print(f"    Transport: CLOSED-LOOP liftoff/lift/cruise/brake/settle (Stage A-4, real pos+vel feedback)")
+    print(f"      EPS_X={EPS_X*1e3:.3f}mm  EPS_V={EPS_V*1e3:.1f}mm/s  V_CEIL={V_CEIL*1e3:.1f}mm/s  "
+          f"D_BRAKE_TRIGGER={D_BRAKE_TRIGGER*1e3:.3f}mm  STALL_TIMEOUT={STALL_TIMEOUT:.1f}s")
+    print(f"      [Stage A-3, F17 fix] Z_LIFTOFF_CONFIRM={Z_LIFTOFF_CONFIRM*1e3:.4f}mm  "
+          f"LIFT_CLEARANCE={LIFT_CLEARANCE*1e3:.2f}mm  LIFT_DWELL={LIFT_DWELL:.2f}s  "
+          f"LIFTOFF_STALL_TIMEOUT={LIFTOFF_STALL_TIMEOUT:.1f}s")
+    print(f"      [Stage A-4, F18 fix] deadbeat vertical+horizontal channels, CTRL_DT_NOMINAL="
+          f"{CTRL_DT_NOMINAL*1e3:.1f}ms, single dipole at fixed standoff _d_lead={_d_lead*1e3:.2f}mm")
     print(f"    --chi-scale {args.chi_scale} (chi={C.chi:.4e})")
     print(f"    Energy tracking: coil I^2*R diagnostic for lunar power budget")
     print()
@@ -2461,7 +3948,7 @@ OUTPUT:
 
     analyze_cross_talk()
 
-    out_dir = Path("outputs") / "Phase2_v5_Fixed"
+    out_dir = Path("outputs") / "Phase2"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     pm = PhaseManager()
@@ -2574,8 +4061,11 @@ OUTPUT:
               f"mean={np.mean(fm_m)/C.W:.1f}×W")
         dip_s.from_numpy(np.zeros(N_DIP, dtype=np.float64))
 
-    # Account for interludes in time estimate
-    t_max_est = (T_CLUSTER_END + 4*TRANSPORT_BUDGET + 3*INTERLUDE_TIME
+    # Account for interludes in time estimate. Uses STALL_TIMEOUT (the
+    # worst-case per-transport ceiling) rather than the ~1.2-1.6s normally
+    # expected from the closed-loop controller, so this stays a safe upper
+    # bound for n_steps_max even if a transport genuinely stalls.
+    t_max_est = (T_CLUSTER_END + 4*STALL_TIMEOUT + 3*INTERLUDE_TIME
                  + SHAPE_TIME + HOLD_TIME + 1.0)
     n_steps_max = int(t_max_est / C.dt)
     out_every   = max(1, int(C.out_dt / C.dt))
@@ -2605,6 +4095,9 @@ OUTPUT:
 
         # Track last known centroids so dipole update always has a value
         centroids = {k: C.qc_3d[k].copy() for k in range(4)}
+        # Stage A-2: real per-cluster mean velocity, needed by the closed-loop
+        # transport controller (see "CLOSED-LOOP TRANSPORT CONTROLLER").
+        velocities = {k: np.zeros(3) for k in range(4)}
 
         while True:
             t = step * C.dt
@@ -2624,6 +4117,19 @@ OUTPUT:
                     save_checkpoint(step, t, pm, pvd, ht, hke, hfm, hspread,
                                     label="post-cluster")
                     last_auto_ckpt_t = t
+                    # Diagnostic-only: keep an UN-overwritten copy of the
+                    # post-cluster checkpoint (the rotating CKPT_FILE gets
+                    # clobbered by the next auto-save ~1s of sim-time later)
+                    # so repeated F18-diagnosis runs can --resume-from it
+                    # instead of re-running the ~14min clustering phase each
+                    # time. Not part of the physics or the normal
+                    # save/resume mechanism.
+                    try:
+                        import shutil as _shutil
+                        _shutil.copyfile(str(CKPT_FILE),
+                                          str(CKPT_DIR / "phase2_checkpoint_postcluster_diag.pkl"))
+                    except Exception:
+                        pass
                 # ── --skip-clustering: stop here so next run starts transport ──
                 if args.skip_clustering:
                     print(f"\n  [skip-clustering] Clustering complete at t={t:.2f}s.")
@@ -2639,18 +4145,24 @@ OUTPUT:
             # During all other phases: skip the GPU sync entirely.
             # Centroids are always read at output steps (cluster_stats does it).
             if is_transport_active:
-                # GPU→CPU sync to get current particle positions
+                # GPU→CPU sync to get current particle positions AND velocities.
+                # Stage A-2: the closed-loop transport controller needs real
+                # velocity feedback, not just position — see "CLOSED-LOOP
+                # TRANSPORT CONTROLLER". vel already exists as a real Taichi
+                # field (used every step by integrate()); this just reads it.
                 if colors_fixed:
                     apply_fixed_colors()
                 else:
                     assign_centres.from_numpy(C.qc_3d)
                     assign_clusters_initial()
                 p_np  = pos.to_numpy()
+                v_np  = vel.to_numpy()
                 cl_np = cluster_id.to_numpy()
-                centroids = {k: get_cluster_centroid_np(p_np, cl_np, k) for k in range(4)}
+                centroids  = {k: get_cluster_centroid_np(p_np, cl_np, k) for k in range(4)}
+                velocities = {k: get_cluster_velocity_np(v_np, cl_np, k) for k in range(4)}
 
             # ── Phase manager update (uses cached centroids when static) ──
-            pm.update(t, centroids)
+            pm.update(t, centroids, velocities)
 
             # ── Shape checkpoint — saved exactly once when shape phase begins ──
             # This gives --skip-to-shape a real particle state to restore from,
@@ -2703,7 +4215,12 @@ OUTPUT:
             actual_batch = max(actual_batch, 1)
 
             # ── Dipole update (once per batch, using cached centroids) ─
-            update_dipoles(t, pm, centroids)
+            update_dipoles(t, pm, centroids, velocities)
+
+            # F18 diagnostic (Stage A-3): real per-control-step LIFT/CRUISE
+            # state for cluster 0, gated behind DEBUG_LIFT_CRUISE=1.
+            if _dbg_lift_cruise and is_transport_active:
+                _debug_lift_cruise_snapshot(t, pm, centroids[_DBG_CLUSTER], velocities[_DBG_CLUSTER], p_np, cl_np)
 
             # ── Batched physics (no Python overhead inside) ────────────
             substep_batch(actual_batch)
@@ -2975,22 +4492,25 @@ OUTPUT:
     print("        Complete radially-inward B² attractor around entire cylinder.")
     print("        Every particle pulled to r=cR regardless of azimuth. ✓")
     print("")
-    print("  [KEPT] CAP Z-PINNING: Hold pair at CAP_SHAPE_HOLD_S=0.40 (was 0.15).")
+    print("  [STALE] The block above (v30 architecture: tilted-moment cap ring,")
+    print("          full-belt wall shaping) describes an EARLIER design than what")
+    print("          actually runs (v33-v36: caps use no active shape dipole; walls")
+    print("          use a single scanning dipole). See CONTEXT.md sec 18 for the")
+    print("          Stage A audit and current status; not rewritten here to keep")
+    print("          this diff bounded to correctness fixes.")
+    print(f"  [FIXED, Stage A] CAP hold ring (IDX_HOLD_A/B) is now PERMANENTLY OFF —")
+    print(f"          it was 2 point attractors, not a symmetric ring (finding F4).")
     print("  [KEPT] CAP cluster dipoles PARKED at z=-5mm (s=0).")
     print("  [KEPT] WALL z-lift: cluster dipole below target, moment +z.")
     print("  [KEPT] All sources EXTERNAL to simulation box.")
-    print("  [KEPT] No wall/surface mechanical boundaries.")
+    print("  [KEPT] No wall/surface mechanical boundaries (surf_conf is a labeled")
+    print("         non-physical placeholder — see CONTEXT.md sec 18.2).")
     print("")
-    print("  FIELD PARAMETERS (v30):")
-    print(f"  [OK]  N_CAP_RING = {N_CAP_RING}  (tilted-moment azimuthal ring dipoles per cap)")
-    print(f"  [OK]  N_WALL_BELT = {N_WALL_BELT} × N_WALL_Z_LEVELS = {N_WALL_Z_LEVELS}  (full belt per wall)")
-    print(f"  [OK]  SHAPE_D_SURF = {SHAPE_D_SURF*1e3:.1f}mm  (increased 0.9→1.5mm, 7.7x force reduction)")
-    print(f"  [OK]  CAP r_ring: {CAP_RING_R_START:.2f}->{CAP_RING_R_END:.2f}->{CAP_COMPRESS_R:.2f} x cR (slower sweep)")
-    print(f"  [OK]  CAP_SHAPE_HOLD_S = {CAP_SHAPE_HOLD_S:.2f}  (increased 0.15→0.40)")
-    print(f"  [OK]  SHAPE_MAX_GRAD_CLAMP = {SHAPE_MAX_GRAD_CLAMP:.0f} T^2/m")
+    print("  FIELD PARAMETERS (Stage A recalibration, see CONTEXT.md sec 18):")
+    print(f"  [OK]  SHAPE_MAX_GRAD_CLAMP = {SHAPE_MAX_GRAD_CLAMP:.0f} T^2/m (numerical guard, F6/F7/F14)")
     print(f"  [OK]  SHAPE_TIME = {SHAPE_TIME:.1f}s  ({SHAPE_TIME/4:.1f}s/cluster, order {SHAPE_ORDER})")
     print(f"  [OK]  Energy diagnostic: {total_energy_J:.3f} J total I^2*R dissipation")
-    print(f"  [OK]  All forces: F = (Vp*chi_eff/2mu0)*grad(B^2) - no hacks, no wall constraints")
+    print(f"  [OK]  All forces: F = (Vp*chi_eff/2mu0)*grad(B^2) + DMT cohesion (F11) - no hacks")
     print("="*72 + "\n")
 
 

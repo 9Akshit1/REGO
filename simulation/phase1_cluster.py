@@ -3,6 +3,14 @@
 REGO Phase 1: Magnetic Manipulation (Taichi CPU-Optimized)
 DEM with magnetic field forces using JIT compilation
 Particles are attracted upward by a magnetic dipole source
+
+LEGACY / DISCONNECTED PROTOTYPE — not part of the active pipeline.
+The real "Phase 1" (clustering) that every downstream stage actually uses
+is the `cluster` state inside phase2_shaping.py's own PhaseManager — see
+CONTEXT.md section 16.2a. This file simulates a different particle count
+(N=200 vs 256), a different config (f32, single crude overhead dipole
+instead of 4 anti-aligned corner pairs), and writes to outputs/Phase1/,
+which nothing downstream reads. Kept for historical reference only.
 """
 
 import taichi as ti

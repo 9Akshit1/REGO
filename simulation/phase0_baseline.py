@@ -3,6 +3,10 @@
 REGO Phase 0: Baseline 3D DEM Simulation (Taichi CPU-Optimized)
 High-performance discrete element method using Taichi JIT compilation
 CPU-compatible with proper VTU/PVD output
+
+LEGACY PROTOTYPE — not stage 0 of a pipeline. Nothing downstream reads
+outputs/Phase0/. The active pipeline starts at phase2_shaping.py; see
+CONTEXT.md section 16.1/16.2a.
 """
 
 import taichi as ti

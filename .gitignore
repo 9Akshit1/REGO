@@ -26,6 +26,13 @@ restart_forced_*.data
 **/*.rocky.files/tmp/
 **/*.rocky.files/simulation/
 
+# Archived/superseded diagnostic data and ad-hoc analysis run output
+# (scripts in simulation/analysis/*.py and findings in *.md are tracked;
+# their raw per-run logs/json dumps are regenerable scratch, kept locally
+# in runs/ for reference but not committed)
+simulation/old_results/
+simulation/analysis/runs/
+
 # Generated plots/images (tracked doc assets are excluded below)
 *.png
 !docs/**/*.png
